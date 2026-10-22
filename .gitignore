@@ -29,3 +29,7 @@ target/
 # IntelliJ
 .idea/
 *.iml
+
+#Ds Store
+.DS_Store
+**/.DS_Store
