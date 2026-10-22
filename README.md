@@ -18,4 +18,3 @@ Bu proje; hasta ve laboratuvar tahlil sistemleri senaryosu üzerinden REST, gRPC
 Tüm ortamı tek komutla ayağa kaldırmak için:
 ```bash
 docker-compose up --build
-ilk derlemede -DskipTests kullanın
