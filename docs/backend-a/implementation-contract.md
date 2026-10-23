@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Work / seat | `backend-a-p0` / `p0-author-claude` |
-| Status | Draft for referee review |
+| Status | Revision 1: referee findings P0-F1…P0-F9 applied (`docs/briefs/reports/p0-referee-codex.md`) |
 | Date | 2026-10-23 |
 | Branch | `berkay/lab-result-service` (base `main@1890b13`) |
 | Module | `services/LabResultService` (Spring Boot 4.1.1, Java 21) |
@@ -83,7 +83,8 @@ class ArchitectureTest {
     static final ArchRule adaptersUseOnlyCoreApi = noClasses()
             .that().resideInAPackage("..adapter..")
             .should().dependOnClassesThat()
-            .resideInAnyPackage("..core.service..", "..persistence..", "..seed..");
+            .resideInAnyPackage("..core.service..", "..persistence..", "..seed..")
+            .allowEmptyShould(true);                       // P1a: no adapter classes exist yet
 
     // Rule 2: core is protocol-free, and core.api is pure (JDK + jspecify)
     @ArchTest
@@ -99,13 +100,20 @@ class ArchitectureTest {
     @ArchTest
     static final ArchRule adaptersAreIndependent = slices()
             .matching("com.benchmark.lab_result_service.adapter.(*)..")
-            .should().notDependOnEachOther();
+            .should().notDependOnEachOther()
+            .allowEmptyShould(true);                       // P1a: no adapter slices exist yet
 }
 ```
 
 Rule 2 stays a single `@ArchTest` field (`CompositeArchRule`). `CompositeArchRule.of/and` and `SlicesShould.notDependOnEachOther` exist in archunit 1.5.1 (`REPRODUCED`, javap). `java..` includes `java.time` and `java.util`.
 
-Extensibility (spec §3.3 "Desteklenebilirlik"): a WebSocket/RSocket endpoint is a new `adapter.websocket` package that injects `LabResultQueryService`. No `core` or `persistence` change, and the three rules apply automatically.
+Empty adapter packages (P0-F1). ArchUnit fails a rule whose `that()` matches no class ("failed to check any classes"), and in P1a no adapter exists. Rules 1 and 3 therefore carry a per-rule `.allowEmptyShould(true)`. The global `archRule.failOnEmptyShould` switch is **not** changed, so rule 2 (whose classes exist from P1a on) still fails on an empty import. `REPRODUCED` with archunit 1.5.1 in a scratch probe: without adapters both rules pass; with an `adapter.rest` class that references `persistence` and `adapter.graphql`, both rules fail with the expected violations. Once adapters exist, the dependency checks are unchanged. From P5 on, `AdapterPresenceTest` (a plain JUnit test, not a fourth ArchUnit rule) asserts that the imported classes include at least one class in `..adapter.rest..` and one in `..adapter.graphql..`, so the empty tolerance cannot hide a mis-scoped import.
+
+P1a test invocation (the legacy `LabResultServiceApplicationTests.contextLoads` needs a datasource and is replaced only in P1, so P1a runs the two API tests by name):
+`services/LabResultService/mvnw -f pom.xml -pl services/LabResultService -am test -Dtest='ArchitectureTest,CoreApiTest' -Dsurefire.failIfNoSpecifiedTests=false`
+(`failIfNoSpecifiedTests=false` because the `-am` reactor also builds `CommonProto`, which has no matching tests.)
+
+Extensibility (spec §3.3 "Desteklenebilirlik"): a WebSocket/RSocket endpoint is a new `adapter.websocket` package that injects `LabResultQueryService`. It needs **no change to the business service (`core.service`, `LabResultQueryService`) or to `persistence`**, and the three rules apply automatically. The only `core.api` change is adding a telemetry label (e.g. `WEBSOCKET`) to the `Protocol` enum.
 
 ---
 
@@ -435,7 +443,7 @@ Assembly (`core.service.LabAssembler`), one linear pass: group `ItemRow`s by `re
 
 ### 5.7 Index-use assertion and EXPLAIN
 
-- P1 IT: on the seeded fixture, run `EXPLAIN (FORMAT TEXT)` for the generated item SQL (100 ids) and assert the plan text mentions `ix_lab_test_item_report_id`. Also assert that the report query plan mentions `ix_lab_report_patient_created`. Do not assert node names or plan shape (R9, X-F11).
+- P1 IT (on the P1 test fixture, §6.8): run `EXPLAIN (FORMAT JSON)` for the generated item SQL (patient 1's 100 ids). Assert that the plan contains an index access (`Index Scan`, `Index Only Scan` or `Bitmap Index Scan`) on `lab_test_item` through **an index whose leading column is `report_id`**. The leading column is resolved from the catalogue (`pg_index.indkey[0]` → `pg_attribute.attname`), not from the index name. Likewise, the report query must use an index on `lab_report` whose leading column is `patient_id`. Do not assert index names, node types beyond "index access", or plan shape (R9, X-F11). That the named indexes `ix_lab_test_item_report_id` / `ix_lab_report_patient_created` **exist** is a schema assertion in `SchemaMigrationIT`.
 - P8: capture `EXPLAIN (ANALYZE, BUFFERS)` of the five statements for patients 1, 2 and 3 on the pinned PG 17 image into `docs/backend-a/explain/`.
 
 ---
@@ -453,7 +461,7 @@ Assembly (`core.service.LabAssembler`), one linear pass: group `ItemRow`s by `re
 | **1001** | First **absent** id (404 case) | — | error tests, Postman |
 | 0, -1 | Invalid id (400) | — | error tests |
 | `abc`, `9223372036854775808` | Non-numeric / overflow (400) | — | REST + GraphQL error tests |
-| test-only | Report with 0 items; two reports with identical `created_at` (tie broken by `id DESC`) | — | inserted by P1 ITs into their own Testcontainers DB, never by the seeder |
+| test-only (2001) | Report with 0 items; two reports with identical `created_at` (tie broken by `id DESC`) | — | inserted by `LabReadRepositoryIT` inside a rolled-back test transaction (§6.8), never by the seeder |
 
 Totals (exact; written to `dataset_meta` and asserted by tests): **1,000 patients, 10,080 reports, 100,800 items.**
 Derivation: reports = 100 (patient 1) + 0 (patient 2) + 998 × 10 = 10,080; items = 1,000 + 0 + 9,980 × 10 = 100,800. Data volume ≈ 20 MB; it is memory-resident in PostgreSQL by design, and the final report must say so (D5).
@@ -550,7 +558,15 @@ R|<id>|<patientId>|<doctorName>|<sampleType>|<createdAt Instant.toString()>
 I|<id>|<reportId>|<testCode>|<testName>|<Double.toString(resultValue)>|<unit>|<true|false>
 ```
 
-Output: 64 lowercase hex characters. The generator computes it from its in-memory rows. The full verifier recomputes it from the database (`SELECT … ORDER BY id` per table, `timestamptz` read as `OffsetDateTime` → `toInstant()`). The **golden value** for `GENERATOR_VERSION = 1` is committed by P2 in `SyntheticDatasetGeneratorTest`. Any generator change fails that test and requires a deliberate version bump.
+Output: 64 lowercase hex characters. The generator computes it from its in-memory rows. The full verifier recomputes it from the database (`SELECT … ORDER BY id` per table, `timestamptz` read as `OffsetDateTime` → `toInstant()`). The **expected value** for `GENERATOR_VERSION = 1` lives in exactly one place, the main resource **`src/main/resources/seed/dataset-v1.json`**, read by `seed.DatasetManifest.expected()`:
+
+```json
+{ "name": "ym491", "generatorVersion": 1, "seed": 4912026,
+  "patientCount": 1000, "reportCount": 10080, "itemCount": 100800,
+  "checksumSha256": "<64 hex, computed and committed in P2>" }
+```
+
+Both the runtime `DatasetVerifier` (`full` mode, and the counts in `cheap` mode) and `SyntheticDatasetGeneratorTest` read it. The test asserts that the generator output (counts, constants, digest) equals the descriptor, so there is no second copy of the checksum in test code. Any generator change fails that test and requires a deliberate version bump (a new `dataset-v2.json`).
 
 ### 6.6 Seeder (`seed.DatasetSeeder`, `ApplicationRunner`, `@Order(0)`, active only when `app.seed.enabled=true`)
 
@@ -573,10 +589,46 @@ Everything runs in **one** transaction:
 | Mode | When | What | On failure |
 |---|---|---|---|
 | `cheap` (default) | every startup | manifest exists; `generator_version = 1`, `seed = 4912026`; `count(*)` of the three tables = manifest counts = expected 1000/10080/100800 | throw, startup fails (container exits non-zero) |
-| `full` | **one-shot gate**: before every measured campaign and at P8 freeze (start once with `APP_DATASET_VERIFY_MODE=full`) | `cheap` + recompute the canonical digest from the DB and compare with the manifest and with the golden constant | throw, startup fails |
+| `full` | **one-shot gate**: before every measured campaign and at P8 freeze (start once with `APP_DATASET_VERIFY_MODE=full`) | `cheap` + recompute the canonical digest from the DB and compare with the `dataset_meta` row and with `seed/dataset-v1.json` (§6.5) | throw, startup fails |
 | `off` | unit/slice tests with tiny fixtures only | nothing | — |
 
 Readiness: the runners finish before `ApplicationReadyEvent`, so `/actuator/health/readiness` reports `UP` only after seeding and verification (`INFERRED 85%`; the P2 IT asserts that a failed verification prevents readiness). An empty database without `seed` fails closed (X-F9), instead of serving 404s.
+
+### 6.8 P1 test fixture (independent of the P2 generator, P0-F5)
+
+P1 runs before the seeder exists, and its ITs must not depend on it. `src/test/resources/fixtures/p1-fixture.sql` is a deterministic SQL script (no `random()`, no `now()`). It has the **same shape and volume** as the production fixture, so planner statistics and index choices are representative, but simpler values:
+
+```sql
+-- p1-fixture.sql — test-only. Same shape as §6.1 (1000 / 10080 / 100800), simple deterministic values.
+INSERT INTO patient (id, tc_no, full_name, birth_date, blood_type)
+SELECT p, (10000000000 + p)::text, 'Test Patient ' || p, DATE '1980-01-01' + (p % 9000),
+       (ARRAY['A+','A-','B+','B-','AB+','AB-','O+','O-'])[1 + p % 8]
+FROM generate_series(1, 1000) AS p;
+
+-- reports: patient 1 → ids 1..100; patient 2 → none; patient p >= 3 → 101 + (p-3)*10 + k   (k = 0 latest)
+INSERT INTO lab_report (id, patient_id, doctor_name, sample_type, created_at)
+SELECT CASE WHEN p = 1 THEN 1 + k ELSE 101 + (p - 3) * 10 + k END, p, 'Dr. Test ' || p,
+       (ARRAY['BLOOD','SERUM','PLASMA','URINE','SALIVA'])[1 + k % 5],
+       TIMESTAMPTZ '2026-01-01 00:00:00+00' - make_interval(days => 3 * k)
+FROM generate_series(1, 1000) AS p
+CROSS JOIN LATERAL generate_series(0, CASE WHEN p = 1 THEN 99 WHEN p = 2 THEN -1 ELSE 9 END) AS k;
+
+-- items: 10 per report, item id = (report_id - 1) * 10 + j, test codes T01..T10
+INSERT INTO lab_test_item (id, report_id, test_code, test_name, result_value, unit, is_critical)
+SELECT (r.id - 1) * 10 + j, r.id, 'T' || lpad(j::text, 2, '0'), 'Test ' || j, j + 0.5, 'u', (j = 10)
+FROM lab_report r CROSS JOIN generate_series(1, 10) AS j;
+
+SELECT setval(pg_get_serial_sequence('patient', 'id'),       (SELECT max(id) FROM patient));
+SELECT setval(pg_get_serial_sequence('lab_report', 'id'),    (SELECT max(id) FROM lab_report));
+SELECT setval(pg_get_serial_sequence('lab_test_item', 'id'), (SELECT max(id) FROM lab_test_item));
+ANALYZE patient, lab_report, lab_test_item;
+```
+
+- The script has not been executed yet (`ASSUMED`; documents-only round). `SchemaMigrationIT`/`LabReadRepositoryIT` execute it first in P1, and they assert the resulting counts 1000/10080/100800.
+- It is loaded once per IT class with `@Sql(scripts = "/fixtures/p1-fixture.sql", executionPhase = BEFORE_TEST_CLASS)` on a class-owned container. The ids match §6.2, so patients 1/2/3/1001 have the same roles as in production. The tcNo values are test-only; they satisfy the DB `CHECK` but are not generator output.
+- Edge cases (patient 2001: one report with 0 items, two reports with identical `created_at`) are inserted by `LabReadRepositoryIT` in the test method itself, under `@Transactional` rollback.
+- Before P3 exists, repository ITs exercise the §5.3 statement sequence through a test-only helper `ReadSequence` (`src/test`), which calls the repository methods in the documented order. P3's real service is not pulled forward.
+- From P2 on, ITs that load this fixture instead of seeding set `app.seed.enabled=false` and `app.dataset.verify-mode=off`. ITs that need the real dataset use the `seed` profile and `cheap`.
 
 ---
 
@@ -715,7 +767,7 @@ Errors (`GraphQlExceptionResolver`, a `DataFetcherExceptionResolverAdapter`); th
 | `PatientNotFoundException` | `NOT_FOUND` | `PATIENT_NOT_FOUND` | exception message |
 | `ServiceUnavailableException` | `INTERNAL_ERROR` | `UNAVAILABLE` | `Service temporarily unavailable` |
 | any other | `INTERNAL_ERROR` | `INTERNAL` | `Internal error` |
-| query syntax/validation error (graphql-java) | `ValidationError` / `InvalidSyntax` | — | graphql-java default |
+| query syntax/validation error (graphql-java, request error) | `InvalidSyntax` / `ValidationError` | — | graphql-java default; counted once as `INVALID_ARGUMENT` by the interceptor (§7.4) |
 
 ### 7.3 gRPC (proposal; Backend B implements, port 9091)
 
@@ -731,7 +783,11 @@ The shape is RFC 0001 §1 (= verdict D7): `Patient`, `LabReport`, `PatientSummar
 | `INTERNAL` | anything else | 500, `code=INTERNAL` | 200, `INTERNAL_ERROR`, `code=INTERNAL` | `INTERNAL` |
 | `CLIENT_ABORTED` | client disconnected / cancelled | — (log + counter) | — | `CANCELLED` (log + counter) |
 
-All adapters call `LabErrorRecorder.record(protocol, code, cause)` exactly once per failed request.
+`LabErrorRecorder.record(protocol, code, cause)` is called **exactly once per failed request**. The counting unit is the request (one HTTP request, one gRPC call), not the field. Hooks per protocol:
+- **REST:** `RestExceptionHandler`. One exception per request, so one call.
+- **gRPC (B):** the `GrpcExceptionHandler`, once per call. Client cancellation is recorded as `CLIENT_ABORTED`.
+- **GraphQL:** `adapter.graphql.GraphQlErrorAccountingInterceptor`, a `WebGraphQlInterceptor`, is the **only** GraphQL caller of `record` (P0-F8). Per request it puts a mutable `LabGraphQlErrors` holder into the `GraphQLContext` (`request.configureExecutionInput(...)`). `GraphQlExceptionResolver` only builds the `GraphQLError` (classification + `extensions.code`) and adds `(code, throwable)` to the holder; it does not log or count. When the response completes, the interceptor computes the request's single code: field errors from the holder, plus request errors from `response.getErrors()` whose classification is graphql-java `InvalidSyntax` or `ValidationError` (these never reach the resolver), which count as `INVALID_ARGUMENT` with no cause. If there are several, the most severe wins: `INTERNAL` > `UNAVAILABLE` > `INVALID_ARGUMENT` > `PATIENT_NOT_FOUND`. Then it calls `record(GRAPHQL, code, cause)` once and logs per §3.4 (INTERNAL with the stack trace of the recorded throwable). A document with two failing root fields therefore counts as one failed request. The benchmark documents have a single root field, so this changes nothing for valid runs.
+- **Client aborts** (all protocols) are not automatically tested. They are checked manually in the P8 shakedown (§10, R8).
 
 ---
 
@@ -787,7 +843,7 @@ Files: `src/main/resources/application.yaml` (default), `application-seed.yaml`,
 | `management.observations.enable.all` | — | — | | — | **`false`** | | |
 | `management.metrics.enable.all` | — | — | | — | **`false`** | | |
 | `springdoc.api-docs.enabled` / `springdoc.swagger-ui.enabled` (only if springdoc is added, R4) | — | `false` | | `false` | `false` | `true` | |
-| `app.cors.allowed-origins` (A, R3) | — | `${APP_CORS_ALLOWED_ORIGINS:}` (empty = CORS off) | | `""` (forced off) | `""` | | |
+| `app.cors.allowed-origins` (A, R3) | — | `${APP_CORS_ALLOWED_ORIGINS:}` (empty = CORS off) | | ignored: `CorsConfig` is `@Profile("!bench & !bench-nomon")` | ignored | | |
 | `app.seed.enabled` (A) | — | `false` | **`true`** | | | | per test |
 | `app.dataset.verify-mode` (A) | — | `${APP_DATASET_VERIFY_MODE:cheap}` | | | | | `off` for slice tests; ITs set `cheap`/`full` explicitly |
 
@@ -795,7 +851,7 @@ Notes:
 - `bench-nomon` = observations off + all meters denied + Prometheus export off + gRPC observation off (R1/F14 full definition). `/actuator/prometheus` returns 404 and `lab.service.calls` becomes a no-op meter. What the off-arm does **not** remove (JVM itself, external cAdvisor/Prometheus host load) is stated in QA's D13 method (§12 Q7).
 - Percentile histograms stay off (no `management.metrics.distribution.percentiles-histogram.*`). k6 is the source of truth for p95/p99.
 - `management.server.port=8081` starts a child context with its own Tomcat and thread pool (R7; shared CPU).
-- CORS (R3): `config.CorsConfig` registers one `WebMvcConfigurer` mapping for `/api/**` and `/graphql`, methods `GET, POST, OPTIONS`, origins from `app.cors.allowed-origins` (comma-separated), only when the list is non-empty. `spring.graphql.cors.*` (exists, `REPRODUCED`) is **not** used, so there is one mechanism. `Timing-Allow-Origin`/`exposedHeaders` are added only if Frontend asks (§12 Q1).
+- CORS (R3): `config.CorsConfig` registers one `WebMvcConfigurer` mapping for `/api/**` and `/graphql`, methods `GET, POST, OPTIONS`, origins from `app.cors.allowed-origins` (comma-separated). Two independent conditions: (1) the class is annotated **`@Profile("!bench & !bench-nomon")`**, so under `bench`/`bench-nomon` the configurer bean does not exist; (2) outside bench it registers a mapping only when the list is non-empty. Condition (1) does not depend on property-source precedence: an environment variable `APP_CORS_ALLOWED_ORIGINS` outranks the empty `app.cors.allowed-origins` in `application-bench.yaml` (referee `REPRODUCED` with Spring Core 7.0.9), so a property value alone cannot guarantee "off in bench" (P0-F3). The only way to get CORS in a benchmark container is to drop the bench profile, which `/actuator/info` `activeProfiles` records. The global CORS configuration also reaches GraphQL's `RouterFunctionMapping` (referee `REPRODUCED`, Spring MVC 7.0.9). `spring.graphql.cors.*` (exists, `REPRODUCED`) is **not** used, so there is one mechanism. `Timing-Allow-Origin`/`exposedHeaders` are added only if Frontend asks (§12 Q1).
 - Logging: no SQL logging and no per-request access log in any profile. Default Logback console appender.
 
 ### 8.2 Environment variables (consumed by A's configuration)
@@ -887,27 +943,30 @@ Test naming: surefire runs `*Test`/`*Tests`; failsafe runs `*IT`. Every test tha
 
 ## 10. Test plan and Definition of Done per phase
 
-Unit tests (`*Test`) need no Docker. `*IT` use `AbstractPostgresIT`: `@Testcontainers`, `@Container @ServiceConnection static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine")` (the DevOps-pinned digest replaces the tag once known, §12 Q11), profile `test`.
+Unit tests (`*Test`) need no Docker. `*IT` use `AbstractPostgresIT`: `@Testcontainers`, `@Container @ServiceConnection static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine")` (the DevOps-pinned digest replaces the tag once known, §12 Q9), profile `test`.
 
 | Phase | Test class | Asserts |
 |---|---|---|
 | P1a | `ArchitectureTest` | the three rules of §2.2 |
 | P1a | `CoreApiTest` | record compact constructors reject nulls and copy lists (mutating the source list does not change the record); `PatientIds.parse`: `"3"`→3, `"abc"`/`""`/`"9223372036854775808"` → `InvalidRequestException(field="patientId")`; exception `code()` values; expected exceptions have an empty stack trace |
 | P1 | `SchemaMigrationIT` | Flyway applies V1 on an empty PG 17; `ddl-auto=validate` passes; named indexes and constraints exist; CHECKs reject `tc_no='01234567890'`, blank names, unknown blood/sample type, `NaN`; `uq_lab_test_item_report_test` rejects duplicates; `DELETE FROM patient` with reports fails (RESTRICT) |
-| P1 | `LabReadRepositoryIT` | the per-case statement counts of §5.3 (incl. test-only empty report and tied `created_at`); ordering `created_at DESC, id DESC`, items `id ASC`; the item SQL for 100 ids has 128 bind markers (padding); EXPLAIN mentions `ix_lab_test_item_report_id` / `ix_lab_report_patient_created` (§5.7) |
+| P1 | `LabReadRepositoryIT` (P1 fixture, §6.8) | the per-case statement counts of §5.3 via `ReadSequence` (incl. test-only empty report and tied `created_at`); ordering `created_at DESC, id DESC`, items `id ASC`; the item SQL for 100 ids has 128 bind markers (padding); index use per §5.7 (leading column `report_id` / `patient_id`, not index names) |
+| P1 | `StartupDbDownIT` | startup-failure case, kept separate from runtime outages: with the datasource URL at a closed port, the application context **fails to start** (Flyway/validate cannot run). There is no HTTP assertion; readiness is never reached |
 | P1 | `LabResultServiceApplicationIT` | the context starts against Testcontainers PG (replaces `LabResultServiceApplicationTests`) |
-| P2 | `SyntheticDatasetGeneratorTest` | golden SHA-256 for version 1; two runs are identical; counts 1000/10080/100800; patient 1 = 100×10, patient 2 = 0, patient 3 = 10×10 with latest report 101 / items 1001..1010; ids as in §6.2; `createdAt` strictly decreasing per patient, whole seconds; `isCritical` consistent with the catalogue; item codes unique per report |
+| P2 | `SyntheticDatasetGeneratorTest` | generator output equals `seed/dataset-v1.json` (counts, version, seed, SHA-256); two runs are identical; counts 1000/10080/100800; patient 1 = 100×10, patient 2 = 0, patient 3 = 10×10 with latest report 101 / items 1001..1010; ids as in §6.2; `createdAt` strictly decreasing per patient, whole seconds; `isCritical` consistent with the catalogue; item codes unique per report |
 | P2 | `TcNoTest` | every generated tcNo matches the regex, is unique, and **fails** an independently written official TC Kimlik validator (both check-digit rules) |
 | P2 | `NameListsTest` / `TestCatalogueTest` | 40 + 40 distinct names; 20 entries; `criticalLow < normalMin`, `normalMax < criticalHigh` |
 | P2 | `DatasetSeederIT` | seeds an empty DB; counts and manifest are right; `nextval` after seeding > max id for each table; second start skips; mismatching manifest → startup fails; rows without manifest → startup fails; row counts unchanged after every failure (nothing deleted); `full` mode passes on a good DB and fails after a row is altered in the disposable container; seed time is logged |
 | P3 | `DefaultLabResultQueryServiceTest` (mocked repository) | assembly/grouping/order; null `latestReport`; empty history; `id <= 0` → `InvalidRequestException` with no repository call; not found; `CannotCreateTransactionException` / `CannotGetJdbcConnectionException` → `ServiceUnavailableException`; other `DataAccessException` propagates; `lab.service.calls` recorded with `method` and `outcome` tags |
 | P3 | `LabResultQueryServiceIT` (seeded) | patient 1 history = 100 × 10; patient 3 summary = report 101 with 10 items; patient 2 empty; 1001 → not found |
 | P4 | `PatientRestControllerTest` (`@WebMvcTest`, mocked service) | golden JSON S1 and S2 (`"isCritical"`, ISO dates, numeric ids); ProblemDetail for 400 (`abc`, overflow, `0`), 404, 503, 500 with sanitized `detail` and `application/problem+json` |
-| P4 | `RestErrorIT` | pool exhaustion (Hikari pool 1, one connection held, timeout 2000 ms) → 503 `UNAVAILABLE`; datasource pointing at a closed port → 503; `lab.errors` incremented |
-| P4 | `CorsConfigTest` | empty property → no `Access-Control-Allow-Origin`; with an origin → preflight OK on `/api/**` and `/graphql`; `bench` → off even if the env var is set |
+| P4 | `RestErrorIT` | Runtime outages **after a healthy startup** (P0-F2). Each case uses its own class-owned container (not the shared base container) plus `@DirtiesContext`, and first asserts `GET …/3/summary` → 200. (a) **Pool exhaustion:** context with `spring.datasource.hikari.maximum-pool-size=1`, `minimum-idle=1`; the test holds the only connection (`dataSource.getConnection()`) and calls the endpoint → 503 `UNAVAILABLE` after ≈ `connection-timeout` (2000 ms). (b) **DB down at transaction begin:** `HikariDataSource.getHikariPoolMXBean().softEvictConnections()`, then `postgres.stop()`, then the call → Hikari cannot acquire a connection → `CannotCreateTransactionException` inside `TransactionTemplate.execute` (`INFERRED 85%`, Hikari `SQLTransientConnectionException` wrapped by `JpaTransactionManager.doBegin`; this test is what proves it) → `ServiceUnavailableException` → 503 `UNAVAILABLE` with sanitized `detail`. Both cases assert `lab.errors{protocol=REST,code=UNAVAILABLE}` +1 and `lab.service.calls{outcome=UNAVAILABLE}` +1. Startup checks are **not** disabled; startup failure is covered separately by `StartupDbDownIT` and `DatasetSeederIT` |
+| P4 | `CorsConfigTest` | empty property → no `Access-Control-Allow-Origin`; with an origin → preflight OK on `/api/**` and `/graphql`; profile `bench` **with** `APP_CORS_ALLOWED_ORIGINS=http://example.test` set as an environment-level property → no CORS headers and no `CorsConfig` bean (guards the env-override case) |
 | P4 | Postman | `docs/backend-a/api/lab-result-service.postman_collection.json` + `local.postman_environment.json` run green against a local instance (manual run, result noted in the P4 report) |
 | P5 | `LabGraphQlControllerTest` (`@GraphQlTest`, mocked service) | S1/S2/S2b responses; error classification + `extensions.code` for each row of §7.2; malformed ID `"abc"` → `BAD_REQUEST`/`INVALID_ARGUMENT` |
 | P5 | `GraphQlStatementCountIT` | S1/S2/S2b statement counts == REST counts (3/3/3 for patients 3/1/1; 2 for patient 2) |
+| P5 | `GraphQlErrorAccountingIT` (full context, `HttpGraphQlTester`; the interceptor is web-layer, so not in `@GraphQlTest`) | a syntax error (`{ patientSummary(`) → `errors[0].extensions.classification = InvalidSyntax`, `lab.errors{protocol=GRAPHQL,code=INVALID_ARGUMENT}` +1; one document with two failing root fields (`a: patientSummary(patientId:"1001") b: patientSummary(patientId:"abc")`) → two `errors` entries but the counter goes up by exactly **1** (code `INVALID_ARGUMENT`); a not-found request → +1 `PATIENT_NOT_FOUND` |
+| P5 | `AdapterPresenceTest` | the production import contains classes in `..adapter.rest..` and `..adapter.graphql..` (§2.2) |
 | P6 | `ObservabilityBenchIT` (`bench`) | `/actuator/prometheus` on the management port contains `http_server_requests_seconds`, `graphql_request_seconds`, `hikaricp_connections`, `lab_service_calls_seconds`, `lab_errors_total`, `jvm_memory_used_bytes`, `process_cpu_usage`; Tomcat `maxKeepAliveRequests == -1` |
 | P6 | `ObservabilityNomonIT` (`bench,bench-nomon`) | `/actuator/prometheus` → 404; `lab.service.calls` is a no-op; the service still answers |
 | P6 | `InfoEndpointIT` | `/actuator/info` contains every key of §11.2 |
@@ -917,9 +976,9 @@ Unit tests (`*Test`) need no Docker. `*IT` use `AbstractPostgresIT`: `@Testconta
 | Phase | Definition of Done (refined from roadmap v2) |
 |---|---|
 | P0 | This contract and `arayuz-tablolari.md` exist; every external item has an owner (§12). |
-| P1a | `core.api` + `ArchitectureTest` + `CoreApiTest` green; published to B (commit + PR #3 comment); B can compile against it. |
+| P1a | `core.api` + `ArchitectureTest` + `CoreApiTest` green with the P1a invocation of §2.2 (adapter rules tolerate empty packages); published to B (commit + PR #3 comment); B can compile against it. |
 | P1 | `services/LabResultService/mvnw -f pom.xml -pl services/LabResultService -am verify` log shows failsafe `Tests run: N` with N > 0 and 0 failures; `application.properties` deleted. |
-| P2 | Unit + `DatasetSeederIT` green; golden checksum committed; seed time logged. |
+| P2 | Unit + `DatasetSeederIT` green; checksum committed in `seed/dataset-v1.json`; seed time logged. |
 | P3 | Service unit + IT green. |
 | M1 | P1–P3 + REST S1/S2 on `bench,seed`: the image builds with the §9.3 recipe and `GET :8080/api/v1/patients/3/summary` / `…/1/lab-history` answer 200; DevOps and QA are notified. |
 | P4 | WebMvc + error ITs green; Postman collection runs locally; CORS property works; springdoc kept or dropped with the reason noted. |
@@ -927,7 +986,7 @@ Unit tests (`*Test`) need no Docker. `*IT` use `AbstractPostgresIT`: `@Testconta
 | P6 | Required meters present in `bench`, absent in `bench-nomon`; `/actuator/info` complete; keep-alive settings verified; error/abort policy + `lab.errors` implemented. |
 | P7a | Canonical trees equal for REST and GraphQL; `payload-sizes.json` emitted. |
 | P7b | All three protocols equal (needs B's adapter). |
-| P8 | With DevOps: compose check (readiness gating, ports 8080/8081/9091); one `full` verify run; EXPLAIN (ANALYZE, BUFFERS) on PG 17 committed; image digests, `payload-sizes.json` and the licence inventory (`docs/backend-a/licences.md`) committed. Staged shakedown with QA: 50 VU → 200 VU × 2 min → 500 VU + spike: 0 protocol errors at 200 VU; saturation behaviour at 500/spike documented; run book reviewed. |
+| P8 | With DevOps: compose check (readiness gating, ports 8080/8081/9091); one `full` verify run; EXPLAIN (ANALYZE, BUFFERS) on PG 17 committed; image digests, `payload-sizes.json` and the licence inventory (`docs/backend-a/licences.md`) committed. Staged shakedown with QA: 50 VU → 200 VU × 2 min → 500 VU + spike: 0 protocol errors at 200 VU; saturation behaviour at 500/spike documented; run book reviewed. **Manual client-abort check (R8, P0-F4):** (1) HTTP, by A + QA: 20 × `curl --max-time 0.05 http://…:8080/api/v1/patients/1/lab-history`, and the same with a `POST /graphql` S2 body, against an otherwise idle service. (2) gRPC, by **B**: 20 × `grpcurl -plaintext -max-time 0.05 … LabService/GetPatientLabHistory` (`patient_id` 1). Expected evidence, recorded in the P8 report: every detected abort produces one WARN line with no stack trace (§3.4); `lab_errors_total{code="CLIENT_ABORTED"}` grows by at most 20 per protocol (an abort that lands after the response was fully written is not detectable, so fewer is acceptable); no ERROR/stack-trace lines; no 5xx; Hikari `active` returns to 0; the next normal request returns 200. No automated chaos test. |
 
 ---
 
@@ -1005,7 +1064,7 @@ Written by `ProtocolEquivalenceIT` to `services/LabResultService/target/payload-
 | Q7 | D13 overhead method: what the off-arm excludes (cAdvisor/Prometheus host load), number of pairs, uncertainty bound | QA | the ≤3 % claim | `bench` vs `bench,bench-nomon`, ≥5 randomized pairs |
 | Q8 | U3 confirmation: k6 → LabResultService directly for all three protocols; BFF timing reported separately, if at all | B + QA | measured runs | direct (U3) |
 | Q9 | Exact PostgreSQL 17 minor and image digest | DevOps | P8 EXPLAIN artefacts; test container tag | `postgres:17-alpine` |
-| Q10 | CI (`./mvnw verify` with Docker on GitHub Actions) | DevOps | nothing on A's path | local `verify` |
+| Q10 | CI (`services/LabResultService/mvnw -f pom.xml -pl services/LabResultService -am verify` with Docker on GitHub Actions) | DevOps | nothing on A's path | local `verify` |
 
 ---
 
@@ -1048,7 +1107,7 @@ Written by `ProtocolEquivalenceIT` to `services/LabResultService/target/payload-
 | Build command | `mvnw -f pom.xml -pl … -am -DskipTests compile` (design check) | §9.3 recipe (module wrapper; there is no root wrapper) | F19, `DIRECT SOURCE` |
 | Roadmap | P3 publishes `core.api` | **P1a** publishes `core.api` | Roadmap v2 |
 | Sentinel result caps (101 reports / 1,001 items, clash idea) | — | **none**; fixture verification guarantees sizes | D1 |
-| EXPLAIN check | exact index names in plan | "plan mentions the index"; full EXPLAIN (ANALYZE, BUFFERS) at P8 | R9 |
+| EXPLAIN check | exact index names in plan | "item query uses an index whose leading column is `report_id`" (index names only checked for existence); full EXPLAIN (ANALYZE, BUFFERS) at P8 | R9, P0-F5 |
 
 ## Appendix B — Conflicts resolved in P0
 
