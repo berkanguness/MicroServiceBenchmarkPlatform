@@ -15,6 +15,9 @@ spring:
       maximum-pool-size: 20
       minimum-idle: 20
       connection-timeout: 2000
+      # Must stay below connection-timeout: Hikari does not clamp its default (5000), so a hung database would
+      # cost ~5 s per acquisition instead of 2 s (chaos finding F3). Hikari's minimum is 250.
+      validation-timeout: 1000
       max-lifetime: 1800000
   jpa:
     open-in-view: false

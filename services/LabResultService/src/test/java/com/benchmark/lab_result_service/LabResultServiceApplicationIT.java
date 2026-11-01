@@ -40,6 +40,9 @@ class LabResultServiceApplicationIT extends AbstractPostgresIT {
         assertThat(hikari.getMinimumIdle()).isEqualTo(20);
         assertThat(hikari.getConnectionTimeout()).isEqualTo(2_000);
         assertThat(hikari.getMaxLifetime()).isEqualTo(1_800_000);
+        // F3: Hikari does not clamp validationTimeout to connectionTimeout; the default 5000 would make a hung
+        // database cost about 5 s per acquisition instead of the contract's 2000 ms
+        assertThat(hikari.getValidationTimeout()).isEqualTo(1_000).isLessThan(hikari.getConnectionTimeout());
     }
 
     @Test
