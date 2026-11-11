@@ -15,5 +15,13 @@ services:
     volumes:
       - lab-pgdata:/var/lib/postgresql/data
 
+  prometheus:
+    image: prom/prometheus:v3.0.0
+    container_name: lab-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
 volumes:
   lab-pgdata:
