@@ -1,0 +1,9 @@
+# Test profile (contract §8.1 "test" column). The datasource comes from Testcontainers @ServiceConnection.
+spring:
+  jpa:
+    properties:
+      hibernate:
+        generate_statistics: true
+  grpc:
+    server:
+      port: 0

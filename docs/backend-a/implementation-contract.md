@@ -822,6 +822,7 @@ Files: `src/main/resources/application.yaml` (default), `application-seed.yaml`,
 | `spring.datasource.hikari.maximum-pool-size` | (10) | `20` (D12) | | | | | |
 | `spring.datasource.hikari.minimum-idle` | (= max) | `20` (fixed pool) | | | | | |
 | `spring.datasource.hikari.connection-timeout` | (30000) | `2000` (D12) | | | | | |
+| `spring.datasource.hikari.validation-timeout` | (5000) | `1000` (F3: must be < `connection-timeout`; Hikari does not clamp it, so a hung DB would cost ~5 s per acquisition) | | | | | |
 | `spring.datasource.hikari.max-lifetime` | (1800000) | `1800000` | | | | | |
 | `spring.jpa.open-in-view` | true | `false` | | | | | |
 | `spring.jpa.hibernate.ddl-auto` | — | `validate` | | | | | |
