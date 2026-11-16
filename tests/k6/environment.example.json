@@ -1,0 +1,11 @@
+{
+  "resourceLimits": null,
+  "imageDigests": null,
+  "cachePolicy": null,
+  "protocolOrder": null,
+  "repetition": null,
+  "monitoringMode": null,
+  "equivalenceEvidence": null,
+  "fullVerificationEvidence": null,
+  "note": "Doruk ile gerçek ortam bilgilerini doldurun. null alanlarla resmi ölçüm başlatılmaz. Monitoring %3 deneyi ayrı çalışma gerektirir."
+}
