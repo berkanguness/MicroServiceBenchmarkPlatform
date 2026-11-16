@@ -16,6 +16,9 @@ message LabItemResponse {
   double result_value = 4;
   string unit = 5;
   bool is_critical = 6;
+  double reference_min = 7;
+  double reference_max = 8;
+  string technician_notes = 9;
 }
 
 message PatientLabHistoryResponse {
