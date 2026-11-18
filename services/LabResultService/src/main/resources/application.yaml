@@ -19,6 +19,15 @@ spring:
       # cost ~5 s per acquisition instead of 2 s (chaos finding F3). Hikari's minimum is 250.
       validation-timeout: 1000
       max-lifetime: 1800000
+      # Chaos F1: pgjdbc socketTimeout (seconds) is a socket READ INACTIVITY timeout (Socket.setSoTimeout), not a
+      # statement-duration limit: it ends a read that receives no bytes for that long, e.g. against a hung/partitioned
+      # database, which the shared service reports as UNAVAILABLE (F2). A whole call can take longer (pool acquisition,
+      # several round trips, slowly progressing reads); size every protocol's client timeout equally and above the
+      # whole service-call budget. 0 disables it. Well above the slowest legitimate statement (ms). Passed as a driver
+      # property, so it also applies when a test's @ServiceConnection supplies the URL. No server-side
+      # statement_timeout (contract §5.5); no retries.
+      data-source-properties:
+        socketTimeout: ${DB_SOCKET_TIMEOUT_SECONDS:5}
   jpa:
     open-in-view: false
     show-sql: false
