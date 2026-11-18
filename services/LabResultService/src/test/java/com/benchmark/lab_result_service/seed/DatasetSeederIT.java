@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -100,6 +101,7 @@ class DatasetSeederIT {
         assertThat(manifest(db)).isEqualTo(DatasetManifest.expected());
         assertRowsEqualTheGenerator(db);
         assertSequencesAreRealigned(db);
+        assertTablesWereManuallyAnalyzed(db);
         Instant seededAt = seededAt(db);
 
         // 2. second start skips: nothing inserted, manifest untouched
@@ -159,8 +161,10 @@ class DatasetSeederIT {
 
         // other seed, same version: also a mismatch
         execute(db, "update dataset_meta set generator_version = 1, seed = 42 where name = 'ym491'");
-        assertThatThrownBy(() -> start(db, true, "cheap", new ArrayList<>()))
+        List<ApplicationEvent> wrongSeedEvents = Collections.synchronizedList(new ArrayList<>());
+        assertThatThrownBy(() -> start(db, true, "cheap", wrongSeedEvents))
                 .hasStackTraceContaining("Dataset mismatch: manifest 'ym491' has generator_version=1, seed=42");
+        assertNeverReady(wrongSeedEvents);
         assertThat(counts(db)).containsExactly(0L, 0L, 0L);
         assertThat(manifest(db).seed()).isEqualTo(42L);
     }
@@ -321,6 +325,29 @@ class DatasetSeederIT {
             long max = queryLong(db, "select max(id) from " + table);
             long next = queryLong(db, "select nextval(pg_get_serial_sequence('" + table + "', 'id'))");
             assertThat(next).as("nextval of %s", table).isGreaterThan(max);
+        }
+    }
+
+    /**
+     * The seeder ran an explicit {@code ANALYZE} on all three tables (§6.6 step 4). Checked via
+     * {@code pg_stat_user_tables.analyze_count}, which counts <em>manual</em> ANALYZE only: autovacuum's analyses go to
+     * {@code autoanalyze_count} / {@code last_autoanalyze}, so the autovacuum daemon can never satisfy this assertion
+     * (unlike {@code pg_stats} rows, which an autoanalyze would also produce). The database is fresh, so a non-zero
+     * count can only come from the seeder. Cumulative statistics are flushed by the analyzing backend asynchronously
+     * (at the latest when its pooled connection is closed), hence the short bounded poll.
+     */
+    private static void assertTablesWereManuallyAnalyzed(String db) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        for (String table : TABLES) {
+            String sql = "select coalesce((select analyze_count from pg_stat_user_tables"
+                    + " where schemaname = current_schema() and relname = '" + table + "'), 0)";
+            long analyzed = queryLong(db, sql);
+            while (analyzed == 0 && System.nanoTime() < deadline) {
+                Thread.sleep(100);
+                analyzed = queryLong(db, sql);
+            }
+            assertThat(analyzed).as("manual ANALYZE count of %s (autoanalyze does not count)", table)
+                    .isPositive();
         }
     }
 
