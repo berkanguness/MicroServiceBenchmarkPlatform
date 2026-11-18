@@ -7,3 +7,12 @@ spring:
   grpc:
     server:
       port: 0
+
+# From P2 on (contract §6.8): ITs on the P1 fixture (or an empty schema) neither seed nor verify. ITs that need the real
+# dataset (DatasetSeederIT) activate the seed profile and set verify-mode explicitly. "off" is quoted: YAML 1.1 reads a
+# bare off as boolean false.
+app:
+  seed:
+    enabled: false
+  dataset:
+    verify-mode: "off"

@@ -1,0 +1,24 @@
+# Synthetic test catalogue, generator version 1 (contract §6.4). Synthetic mnemonics, no LOINC codes.
+# Values are synthetic and illustrative, not clinical guidance. criticalLow = 0 means "no low-critical draw".
+# Order is significant: the row index is the catalogue index drawn by the generator (§6.3).
+# code|name|unit|normalMin|normalMax|criticalLow|criticalHigh
+GLU|Glucose|mg/dL|70|100|40|400
+HGB|Hemoglobin|g/dL|12.0|17.5|7.0|20.0
+WBC|Leukocytes|10^3/uL|4.0|11.0|2.0|30.0
+PLT|Platelets|10^3/uL|150|400|50|1000
+NA|Sodium|mmol/L|135|145|120|160
+K|Potassium|mmol/L|3.5|5.1|2.5|6.5
+CL|Chloride|mmol/L|98|107|80|120
+CA|Calcium|mg/dL|8.6|10.2|6.5|13.0
+CREA|Creatinine|mg/dL|0.6|1.2|0.3|4.0
+BUN|Urea nitrogen|mg/dL|7|20|2|100
+ALT|Alanine aminotransferase|U/L|7|56|0|1000
+AST|Aspartate aminotransferase|U/L|10|40|0|1000
+ALP|Alkaline phosphatase|U/L|44|147|0|1000
+TBIL|Total bilirubin|mg/dL|0.1|1.2|0|15.0
+ALB|Albumin|g/dL|3.5|5.0|1.5|6.5
+CHOL|Total cholesterol|mg/dL|125|200|0|500
+TRIG|Triglycerides|mg/dL|50|150|0|1000
+CRP|C-reactive protein|mg/L|0.1|5.0|0|200
+TSH|Thyroid-stimulating hormone|mIU/L|0.4|4.0|0.01|20.0
+HBA1C|Hemoglobin A1c|%|4.0|5.6|0|14.0
