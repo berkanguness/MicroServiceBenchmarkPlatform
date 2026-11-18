@@ -427,7 +427,7 @@ Per-case statement counts (R9). They are asserted with Hibernate `Statistics.get
 
 The counts do not depend on the number of reports or items. GraphQL must produce exactly the same count as REST for the same call (P5 test).
 
-Assembly (`core.service.LabAssembler`), one linear pass: group `ItemRow`s by `reportId` into a `LinkedHashMap<Long, List<LabTestItemView>>` (SQL order is preserved), then map the reports in SQL order, using `List.of()` when a report has no items. All lists are wrapped by the record constructors (`List.copyOf`). Ordering is deterministic: reports `created_at DESC, id DESC`, items `id ASC`.
+Assembly (`core.service.LabAssembler`), one linear pass: group `ItemRow`s by `reportId` into a `LinkedHashMap<Long, List<LabTestItemView>>` (SQL order is preserved), then map the reports in SQL order, using `List.of()` when a report has no items. All lists are wrapped by the record constructors (`List.copyOf`). Ordering is deterministic: reports `created_at DESC, id DESC`, items `id ASC`. (P3) The transaction callback returns only rows; assembly and the 404 decision happen after the transaction has ended, so the connection is held only for the queries and a 404 commits instead of rolling back.
 
 ### 5.4 IN padding
 
