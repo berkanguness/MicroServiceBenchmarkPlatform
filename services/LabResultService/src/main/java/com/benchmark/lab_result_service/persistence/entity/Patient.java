@@ -13,7 +13,7 @@ import lombok.NoArgsConstructor;
 
 /**
  * Mapping of {@code patient} (V1). Exists for {@code ddl-auto=validate} and JPQL typing only; the read path
- * projects straight into {@code core.api.PatientView} and never hydrates this entity (contract §4.1, §5).
+ * projects straight into {@code core.api.dto.PatientView} and never hydrates this entity (contract §4.1, §5).
  */
 @Entity
 @Table(name = "patient")

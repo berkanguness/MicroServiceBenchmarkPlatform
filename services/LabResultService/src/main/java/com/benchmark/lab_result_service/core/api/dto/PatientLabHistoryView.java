@@ -1,4 +1,4 @@
-package com.benchmark.lab_result_service.core.api;
+package com.benchmark.lab_result_service.core.api.dto;
 
 import java.util.List;
 import java.util.Objects;

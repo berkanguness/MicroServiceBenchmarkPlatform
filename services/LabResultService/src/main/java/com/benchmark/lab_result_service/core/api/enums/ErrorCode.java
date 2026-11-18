@@ -1,4 +1,4 @@
-package com.benchmark.lab_result_service.core.api;
+package com.benchmark.lab_result_service.core.api.enums;
 
 public enum ErrorCode {
     INVALID_ARGUMENT,     // 400 / BAD_REQUEST / INVALID_ARGUMENT

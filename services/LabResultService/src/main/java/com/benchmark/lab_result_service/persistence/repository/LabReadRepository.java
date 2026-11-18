@@ -1,6 +1,6 @@
 package com.benchmark.lab_result_service.persistence.repository;
 
-import com.benchmark.lab_result_service.core.api.PatientView;
+import com.benchmark.lab_result_service.core.api.dto.PatientView;
 import com.benchmark.lab_result_service.persistence.entity.Patient;
 import com.benchmark.lab_result_service.persistence.row.ItemRow;
 import com.benchmark.lab_result_service.persistence.row.ReportRow;
@@ -19,10 +19,10 @@ public interface LabReadRepository extends Repository<Patient, Long> {
 
     /**
      * Fully qualified name of the {@code PatientView} record used in the JPQL constructor expression. The single
-     * place to change if {@code PatientView} moves package (e.g. to {@code core.api.dto}); a test pins it to
+     * place to change if {@code PatientView} moves package; a test pins it to
      * {@code PatientView.class.getName()}.
      */
-    String PATIENT_VIEW = "com.benchmark.lab_result_service.core.api.PatientView";
+    String PATIENT_VIEW = "com.benchmark.lab_result_service.core.api.dto.PatientView";
 
     /** Fully qualified name of {@link ReportRow} for JPQL constructor expressions. */
     String REPORT_ROW = "com.benchmark.lab_result_service.persistence.row.ReportRow";

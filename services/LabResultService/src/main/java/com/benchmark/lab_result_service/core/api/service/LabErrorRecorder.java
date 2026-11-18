@@ -1,5 +1,7 @@
-package com.benchmark.lab_result_service.core.api;
+package com.benchmark.lab_result_service.core.api.service;
 
+import com.benchmark.lab_result_service.core.api.enums.ErrorCode;
+import com.benchmark.lab_result_service.core.api.enums.Protocol;
 import org.jspecify.annotations.Nullable;
 
 /** Single error-logging and counting policy for all adapters (R5/F15). Implemented in config by MicrometerLabErrorRecorder. */

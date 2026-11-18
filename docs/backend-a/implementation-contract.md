@@ -55,8 +55,14 @@ Base package `com.benchmark.lab_result_service` (it exists: `LabResultServiceApp
 ```
 com.benchmark.lab_result_service
 ├── LabResultServiceApplication
-├── core.api               records, LabResultQueryService, exceptions, ErrorCode, Protocol,
-│                          PatientIds, LabErrorRecorder          (depends on: java.*, org.jspecify only)
+├── core.api               (depends on: java.*, org.jspecify only; each sub-package @NullMarked)
+│   ├── .service           LabResultQueryService, LabErrorRecorder
+│   ├── .dto               PatientView, LabTestItemView, LabReportView, PatientSummaryView,
+│   │                      PatientLabHistoryView
+│   ├── .enums             ErrorCode, Protocol
+│   ├── .exception         LabResultException (sealed), InvalidRequestException,
+│   │                      PatientNotFoundException, ServiceUnavailableException
+│   └── .util              PatientIds
 ├── core.service           DefaultLabResultQueryService, LabAssembler
 ├── persistence.entity     Patient, LabReport, LabTestItem       (schema validation + JPQL typing only)
 ├── persistence.row        ReportRow, ItemRow                    (flat projection rows)
@@ -105,6 +111,8 @@ class ArchitectureTest {
 }
 ```
 
+`..core.api..` covers all `core.api.*` sub-packages (`service`, `dto`, `enums`, `exception`, `util`).
+
 Rule 2 stays a single `@ArchTest` field (`CompositeArchRule`). `CompositeArchRule.of/and` and `SlicesShould.notDependOnEachOther` exist in archunit 1.5.1 (`REPRODUCED`, javap). `java..` includes `java.time` and `java.util`.
 
 Empty adapter packages (P0-F1). ArchUnit fails a rule whose `that()` matches no class ("failed to check any classes"), and in P1a no adapter exists. Rules 1 and 3 therefore carry a per-rule `.allowEmptyShould(true)`. The global `archRule.failOnEmptyShould` switch is **not** changed, so rule 2 (whose classes exist from P1a on) still fails on an empty import. `REPRODUCED` with archunit 1.5.1 in a scratch probe: without adapters both rules pass; with an `adapter.rest` class that references `persistence` and `adapter.graphql`, both rules fail with the expected violations. Once adapters exist, the dependency checks are unchanged. From P5 on, `AdapterPresenceTest` (a plain JUnit test, not a fourth ArchUnit rule) asserts that the imported classes include at least one class in `..adapter.rest..` and one in `..adapter.graphql..`, so the empty tolerance cannot hide a mis-scoped import.
@@ -113,15 +121,15 @@ P1a test invocation (the legacy `LabResultServiceApplicationTests.contextLoads` 
 `services/LabResultService/mvnw -f pom.xml -pl services/LabResultService -am test -Dtest='ArchitectureTest,CoreApiTest' -Dsurefire.failIfNoSpecifiedTests=false`
 (`failIfNoSpecifiedTests=false` because the `-am` reactor also builds `CommonProto`, which has no matching tests.)
 
-Extensibility (spec §3.3 "Desteklenebilirlik"): a WebSocket/RSocket endpoint is a new `adapter.websocket` package that injects `LabResultQueryService`. It needs **no change to the business service (`core.service`, `LabResultQueryService`) or to `persistence`**, and the three rules apply automatically. The only `core.api` change is adding a telemetry label (e.g. `WEBSOCKET`) to the `Protocol` enum.
+Extensibility (spec §3.3 "Desteklenebilirlik"): a WebSocket/RSocket endpoint is a new `adapter.websocket` package that injects `LabResultQueryService`. It needs **no change to the business service (`core.service`, `LabResultQueryService`) or to `persistence`**, and the three rules apply automatically. The only `core.api` change is adding a telemetry label (e.g. `WEBSOCKET`) to the `core.api.enums.Protocol` enum.
 
 ---
 
 ## 3. `core.api` (published by P1a to Backend B)
 
-All files are in `com.benchmark.lab_result_service.core.api`. `package-info.java` carries `@org.jspecify.annotations.NullMarked` (jspecify is on the classpath, `VERIFIED-EARLIER` design-r1 §3.2). Nothing is nullable unless annotated `@Nullable`.
+All files are in `com.benchmark.lab_result_service.core.api` sub-packages (`service`, `dto`, `enums`, `exception`, `util`). Each sub-package has its own `package-info.java` with `@org.jspecify.annotations.NullMarked` (jspecify does not inherit to sub-packages), enforced by `CoreApiTest` (jspecify is on the classpath, `VERIFIED-EARLIER` design-r1 §3.2). The root `core.api/package-info.java` is kept (now without types) so any future root type is `@NullMarked`. The sealed exception hierarchy must stay in one package. Nothing is nullable unless annotated `@Nullable`.
 
-### 3.1 Records
+### 3.1 Records (`core.api.dto`)
 
 ```java
 public record PatientView(long id, String tcNo, String fullName, LocalDate birthDate, String bloodType) {
@@ -157,7 +165,7 @@ public record PatientLabHistoryView(PatientView patient, List<LabReportView> rep
 
 Why records: Jackson derives the JSON name from the record component, so REST emits `"isCritical"`. A Lombok POJO would emit `"critical"` (design-r1 §3.2, `INFERRED 90%`; pinned by the golden JSON test in P4). There are no `patientId`/`reportId` fields inside nested objects (D11).
 
-### 3.2 Service interface
+### 3.2 Service interface (`core.api.service`)
 
 ```java
 /** The single business entry point. Every protocol adapter calls exactly one method, exactly once, per request. */
@@ -178,7 +186,7 @@ public interface LabResultQueryService {
 
 RFC 0001 ↔ RPC mapping: `GetPatient` → `getPatient`, `GetPatientSummary` → `getPatientSummary`, `GetPatientLabHistory` → `getPatientLabHistory`.
 
-### 3.3 Errors
+### 3.3 Errors (`core.api.exception`, `core.api.enums.ErrorCode`)
 
 ```java
 public enum ErrorCode {
@@ -228,7 +236,7 @@ public final class ServiceUnavailableException extends LabResultException {
 
 Expected errors (400/404) carry no stack trace, so a misconfigured k6 run does not burn CPU on `fillInStackTrace`, equally for every protocol. Anything that is not a `LabResultException` is `INTERNAL`.
 
-### 3.4 Shared helpers
+### 3.4 Shared helpers (`core.api.util.PatientIds`, `core.api.service.LabErrorRecorder`, `core.api.enums.Protocol`)
 
 ```java
 public enum Protocol { REST, GRAPHQL, GRPC }
@@ -366,7 +374,7 @@ public record ItemRow(long reportId, long id, String testCode, String testName, 
 public interface LabReadRepository extends Repository<Patient, Long> {
 
     @Query("""
-        select new com.benchmark.lab_result_service.core.api.PatientView(p.id, p.tcNo, p.fullName, p.birthDate, p.bloodType)
+        select new com.benchmark.lab_result_service.core.api.dto.PatientView(p.id, p.tcNo, p.fullName, p.birthDate, p.bloodType)
         from Patient p where p.id = :id""")
     Optional<PatientView> findPatient(@Param("id") long id);
 
@@ -954,7 +962,7 @@ Unit tests (`*Test`) need no Docker. `*IT` use `AbstractPostgresIT`: `@Testconta
 | Phase | Test class | Asserts |
 |---|---|---|
 | P1a | `ArchitectureTest` | the three rules of §2.2 |
-| P1a | `CoreApiTest` | record compact constructors reject nulls and copy lists (mutating the source list does not change the record); `PatientIds.parse`: `"3"`→3, `"abc"`/`""`/`"9223372036854775808"` → `InvalidRequestException(field="patientId")`; exception `code()` values; expected exceptions have an empty stack trace |
+| P1a | `CoreApiTest` | record compact constructors reject nulls and copy lists (mutating the source list does not change the record); `PatientIds.parse`: `"3"`→3, `"abc"`/`""`/`"9223372036854775808"` → `InvalidRequestException(field="patientId")`; exception `code()` values; expected exceptions have an empty stack trace; `everyCoreApiSubPackageIsNullMarked` (one class per sub-package `service`/`dto`/`enums`/`exception`/`util`: its package carries `@NullMarked`) |
 | P1 | `SchemaMigrationIT` | Flyway applies V1 on an empty PG 17; `ddl-auto=validate` passes; named indexes and constraints exist; CHECKs reject `tc_no='01234567890'`, blank names, unknown blood/sample type, `NaN`; `uq_lab_test_item_report_test` rejects duplicates; `DELETE FROM patient` with reports fails (RESTRICT) |
 | P1 | `LabReadRepositoryIT` (P1 fixture, §6.8) | the per-case statement counts of §5.3 via `ReadSequence` (incl. test-only empty report and tied `created_at`); ordering `created_at DESC, id DESC`, items `id ASC`; the item SQL for 100 ids has 128 bind markers (padding); index use per §5.7 (leading column `report_id` / `patient_id`, not index names); **fixture sanity**: counts 1000/10080/100800, and every `patient.tc_no` fails an independently written official TC Kimlik validator (`OfficialTcKimlikValidator` in `src/test`, both check-digit rules; P2's `TcNoTest` reuses it) |
 | P1 | `StartupDbDownIT` | startup-failure case, kept separate from runtime outages: with the datasource URL at a closed port, the application context **fails to start** (Flyway/validate cannot run). There is no HTTP assertion; readiness is never reached |
