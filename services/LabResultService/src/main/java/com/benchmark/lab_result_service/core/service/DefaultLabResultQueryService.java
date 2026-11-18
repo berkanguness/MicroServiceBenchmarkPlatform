@@ -17,15 +17,20 @@ import com.benchmark.lab_result_service.persistence.row.ReportRow;
 import io.micrometer.core.instrument.Clock;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import java.sql.SQLException;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.TransientDataAccessResourceException;
 import org.springframework.stereotype.Service;
@@ -53,6 +58,9 @@ public class DefaultLabResultQueryService implements LabResultQueryService {
 
     static final String TIMER = "lab.service.calls";
     static final String SUCCESS = "SUCCESS";
+
+    /** SQLStates of class 57 with which PostgreSQL ends a session: admin_shutdown, crash_shutdown, cannot_connect_now. */
+    static final Set<String> SERVER_ENDED_SESSION = Set.of("57P01", "57P02", "57P03");
 
     private static final String ID_FIELD = "patientId";
     private static final String ID_REASON = "must be a positive 64-bit integer";
@@ -227,10 +235,33 @@ public class DefaultLabResultQueryService implements LabResultQueryService {
         return thrown;
     }
 
-    /** The §5.5 list: the database cannot be reached, a connection cannot be had, or a transaction cannot begin. */
+    /**
+     * The §5.5 list: the database cannot be reached, a connection cannot be had, a transaction cannot begin, or the
+     * server ended the session.
+     */
     static boolean isUnavailable(Throwable e) {
         return e instanceof CannotCreateTransactionException
                 || e instanceof DataAccessResourceFailureException          // includes CannotGetJdbcConnectionException
-                || e instanceof TransientDataAccessResourceException;
+                || e instanceof TransientDataAccessResourceException
+                || e instanceof DataAccessException && hasConnectionLossSqlState(e);
+    }
+
+    /**
+     * P4 (chaos case c): when PostgreSQL itself ends the session, e.g. {@code pg_terminate_backend} or the fast shutdown
+     * of {@code docker stop}, the in-flight statement fails with {@code FATAL 57P01 terminating connection due to
+     * administrator command}. Hibernate maps 57P01 to {@code GenericJDBCException} and Spring to
+     * {@code JpaSystemException}, which is none of the types above. The SQLState decides instead: class {@code 08}
+     * (connection exception) and {@code 57P01}/{@code 57P02}/{@code 57P03} (admin shutdown, crash shutdown, cannot
+     * connect now). Any other SQLState stays INTERNAL.
+     */
+    static boolean hasConnectionLossSqlState(Throwable e) {
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Throwable t = e; t != null && seen.add(t); t = t.getCause()) {
+            if (t instanceof SQLException sql && sql.getSQLState() instanceof String state
+                    && (state.startsWith("08") || SERVER_ENDED_SESSION.contains(state))) {
+                return true;
+            }
+        }
+        return false;
     }
 }

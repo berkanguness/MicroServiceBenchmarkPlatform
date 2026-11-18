@@ -38,6 +38,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.hibernate.TransactionException;
+import org.hibernate.exception.GenericJDBCException;
 import org.hibernate.exception.JDBCConnectionException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -296,6 +297,41 @@ class DefaultLabResultQueryServiceTest {
 
         assertThatThrownBy(() -> service.getPatient(1)).isSameAs(rollbackFailure);
         assertOneCall("getPatient", "INTERNAL");
+    }
+
+    /**
+     * P4 chaos case (c), REPRODUCED in RestErrorIT: PostgreSQL ends the session (pg_terminate_backend / fast shutdown)
+     * while a statement runs. Hibernate maps FATAL 57P01 to GenericJDBCException → JpaSystemException, and the
+     * rollback on the closed connection then fails too.
+     */
+    @Test
+    void sessionEndedByTheServerMaskedByAFailedRollbackIsUnavailable() {
+        var terminated = new JpaSystemException(new GenericJDBCException("JDBC exception executing SQL",
+                new SQLException("FATAL: terminating connection due to administrator command", "57P01")));
+        var rollbackFailure = new JpaSystemException(new TransactionException("Unable to rollback against JDBC Connection"));
+        when(repository.findPatient(1)).thenThrow(terminated);
+        doThrow(rollbackFailure).when(txManager).rollback(any());
+
+        assertThatThrownBy(() -> service.getPatient(1))
+                .isInstanceOfSatisfying(ServiceUnavailableException.class, e -> assertThat(e.getCause()).isSameAs(terminated));
+        assertOneCall("getPatient", "UNAVAILABLE");
+    }
+
+    @Test
+    void connectionLossSqlStatesAreUnavailableOthersStayInternal() {
+        for (String state : List.of("57P01", "57P02", "57P03", "08006", "08001", "08003")) {
+            var e = new JpaSystemException(new GenericJDBCException("x", new SQLException("x", state)));
+            assertThat(DefaultLabResultQueryService.translate(e, null)).as(state).isInstanceOf(ServiceUnavailableException.class);
+        }
+        for (String state : List.of("57014", "57000", "42P01", "40001", "23505", "XX000")) {
+            var e = new JpaSystemException(new GenericJDBCException("x", new SQLException("x", state)));
+            assertThat(DefaultLabResultQueryService.translate(e, null)).as(state).isSameAs(e);
+        }
+        var noState = new JpaSystemException(new TransactionException("x", new SQLException("Connection is closed")));
+        assertThat(DefaultLabResultQueryService.translate(noState, null)).as("no SQLState").isSameAs(noState);
+        // not a DataAccessException: never classified by SQLState
+        var raw = new IllegalStateException(new SQLException("x", "57P01"));
+        assertThat(DefaultLabResultQueryService.translate(raw, null)).isSameAs(raw);
     }
 
     @Test
