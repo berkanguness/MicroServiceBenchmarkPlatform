@@ -1,7 +1,7 @@
 package com.benchmark.lab_result_service.persistence.repository;
 
 import com.benchmark.lab_result_service.config.TransactionConfig;
-import com.benchmark.lab_result_service.core.api.PatientView;
+import com.benchmark.lab_result_service.core.api.dto.PatientView;
 import com.benchmark.lab_result_service.persistence.row.ItemRow;
 import com.benchmark.lab_result_service.persistence.row.ReportRow;
 import java.util.List;

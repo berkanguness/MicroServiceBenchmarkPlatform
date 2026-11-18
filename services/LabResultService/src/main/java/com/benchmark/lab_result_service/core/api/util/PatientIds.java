@@ -1,4 +1,6 @@
-package com.benchmark.lab_result_service.core.api;
+package com.benchmark.lab_result_service.core.api.util;
+
+import com.benchmark.lab_result_service.core.api.exception.InvalidRequestException;
 
 /** Parses the textual ids of REST path variables and GraphQL ID arguments, with the same rule for both protocols. */
 public final class PatientIds {

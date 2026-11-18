@@ -2,7 +2,7 @@ package com.benchmark.lab_result_service.persistence.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.benchmark.lab_result_service.core.api.PatientView;
+import com.benchmark.lab_result_service.core.api.dto.PatientView;
 import com.benchmark.lab_result_service.persistence.row.ItemRow;
 import com.benchmark.lab_result_service.persistence.row.ReportRow;
 import org.junit.jupiter.api.Test;

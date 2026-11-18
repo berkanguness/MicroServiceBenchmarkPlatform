@@ -1,5 +1,6 @@
-package com.benchmark.lab_result_service.core.api;
+package com.benchmark.lab_result_service.core.api.exception;
 
+import com.benchmark.lab_result_service.core.api.enums.ErrorCode;
 import org.jspecify.annotations.Nullable;
 
 public sealed abstract class LabResultException extends RuntimeException

@@ -4,10 +4,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.benchmark.lab_result_service.core.api.dto.LabReportView;
+import com.benchmark.lab_result_service.core.api.dto.LabTestItemView;
+import com.benchmark.lab_result_service.core.api.dto.PatientLabHistoryView;
+import com.benchmark.lab_result_service.core.api.dto.PatientSummaryView;
+import com.benchmark.lab_result_service.core.api.dto.PatientView;
+import com.benchmark.lab_result_service.core.api.enums.ErrorCode;
+import com.benchmark.lab_result_service.core.api.exception.InvalidRequestException;
+import com.benchmark.lab_result_service.core.api.exception.PatientNotFoundException;
+import com.benchmark.lab_result_service.core.api.exception.ServiceUnavailableException;
+import com.benchmark.lab_result_service.core.api.service.LabResultQueryService;
+import com.benchmark.lab_result_service.core.api.util.PatientIds;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import org.jspecify.annotations.NullMarked;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -130,5 +142,15 @@ class CoreApiTest {
         ServiceUnavailableException e = new ServiceUnavailableException(cause);
         assertThat(e.getStackTrace()).isNotEmpty();
         assertThat(e.getCause()).isSameAs(cause);
+    }
+
+    /** jspecify's @NullMarked does not inherit to sub-packages: every core.api sub-package needs its own package-info. */
+    @ParameterizedTest
+    @ValueSource(classes = {LabResultQueryService.class, PatientView.class, ErrorCode.class,
+            ServiceUnavailableException.class, PatientIds.class})
+    void everyCoreApiSubPackageIsNullMarked(Class<?> member) {
+        Package pkg = member.getPackage();
+        assertThat(pkg.getName()).startsWith("com.benchmark.lab_result_service.core.api.");
+        assertThat(pkg.isAnnotationPresent(NullMarked.class)).as("%s is @NullMarked", pkg.getName()).isTrue();
     }
 }
