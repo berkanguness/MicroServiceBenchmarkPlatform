@@ -11,11 +11,13 @@ import com.benchmark.lab_result_service.core.api.exception.InvalidRequestExcepti
 import com.benchmark.lab_result_service.core.api.exception.PatientNotFoundException;
 import com.benchmark.lab_result_service.core.api.service.LabResultQueryService;
 import com.benchmark.lab_result_service.testsupport.AbstractPostgresIT;
+import com.zaxxer.hikari.HikariDataSource;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.persistence.EntityManagerFactory;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.LongStream;
+import javax.sql.DataSource;
 import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +38,7 @@ class LabResultQueryServiceIT extends AbstractPostgresIT {
     @Autowired LabResultQueryService service;
     @Autowired EntityManagerFactory emf;
     @Autowired MeterRegistry registry;
+    @Autowired DataSource dataSource;
 
     private Statistics stats;
 
@@ -48,6 +51,13 @@ class LabResultQueryServiceIT extends AbstractPostgresIT {
     @Test
     void theServiceBeanIsTheSharedImplementation() {
         assertThat(service).isInstanceOf(DefaultLabResultQueryService.class);
+    }
+
+    /** Chaos F1: the default in-flight bound reaches the driver also when @ServiceConnection supplies the URL. */
+    @Test
+    void jdbcSocketTimeoutDefaultsToFiveSeconds() throws Exception {
+        assertThat(dataSource.unwrap(HikariDataSource.class).getDataSourceProperties().getProperty("socketTimeout"))
+                .isEqualTo("5");
     }
 
     @Test

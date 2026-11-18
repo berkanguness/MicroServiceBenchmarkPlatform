@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -24,6 +25,8 @@ import com.benchmark.lab_result_service.persistence.row.ItemRow;
 import com.benchmark.lab_result_service.persistence.row.ReportRow;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.sql.SQLException;
+import java.sql.SQLTransientConnectionException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -34,11 +37,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
+import org.hibernate.TransactionException;
+import org.hibernate.exception.JDBCConnectionException;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.InvalidDataAccessResourceUsageException;
+import org.springframework.dao.TransientDataAccessResourceException;
 import org.springframework.jdbc.CannotGetJdbcConnectionException;
+import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -223,6 +232,83 @@ class DefaultLabResultQueryServiceTest {
 
         assertThatThrownBy(() -> service.getPatientSummary(3)).isSameAs(bug);
         assertOneCall("getPatientSummary", "INTERNAL");
+    }
+
+    /** The exact chain observed for an exhausted pool (chaos H1): Hikari's acquisition timeout at transaction begin. */
+    @Test
+    void poolExhaustionChainIsUnavailable() {
+        var hikari = new SQLTransientConnectionException(
+                "lab-hikari - Connection is not available, request timed out after 2000ms (total=20, active=20, idle=0, waiting=1)");
+        var cause = new CannotCreateTransactionException("Could not open JPA EntityManager for transaction",
+                new JDBCConnectionException("Unable to acquire JDBC Connection", hikari));
+        when(txManager.getTransaction(any())).thenThrow(cause);
+
+        assertThatThrownBy(() -> service.getPatientLabHistory(1))
+                .isInstanceOfSatisfying(ServiceUnavailableException.class, e -> assertThat(e.getCause()).isSameAs(cause))
+                .rootCause().isSameAs(hikari);
+        assertOneCall("getPatientLabHistory", "UNAVAILABLE");
+    }
+
+    @Test
+    void transientResourceFailureIsUnavailable() {
+        when(repository.findPatient(1)).thenThrow(new TransientDataAccessResourceException("resource"));
+
+        assertThatThrownBy(() -> service.getPatient(1)).isInstanceOf(ServiceUnavailableException.class);
+    }
+
+    /**
+     * Chaos T-3 / F2: the connection dies mid-transaction, then the rollback on it fails. Spring rethrows the rollback
+     * failure; the service must classify by the callback's exception.
+     */
+    @Test
+    void connectionLossMaskedByAFailedRollbackIsStillUnavailable() {
+        var lost = new DataAccessResourceFailureException("JDBC exception executing SQL [An I/O error occurred]",
+                new JDBCConnectionException("An I/O error occurred while sending to the backend.", new SQLException("I/O", "08006")));
+        var rollbackFailure = new JpaSystemException(
+                new TransactionException("Unable to rollback against JDBC Connection", new SQLException("Connection is closed")));
+        when(repository.findPatient(3)).thenReturn(Optional.of(PATIENT));
+        when(repository.findLatestReport(3)).thenThrow(lost);
+        doThrow(rollbackFailure).when(txManager).rollback(any());
+
+        assertThatThrownBy(() -> service.getPatientSummary(3))
+                .isInstanceOfSatisfying(ServiceUnavailableException.class, e -> assertThat(e.getCause()).isSameAs(lost));
+        assertOneCall("getPatientSummary", "UNAVAILABLE");
+    }
+
+    /** Same, when the rollback failure is a {@link TransactionSystemException} (Spring attaches the original). */
+    @Test
+    void connectionLossMaskedByATransactionSystemExceptionIsUnavailable() {
+        var lost = new CannotGetJdbcConnectionException("lost");
+        when(repository.findPatient(1)).thenThrow(lost);
+        doThrow(new TransactionSystemException("Could not roll back")).when(txManager).rollback(any());
+
+        assertThatThrownBy(() -> service.getPatient(1))
+                .isInstanceOfSatisfying(ServiceUnavailableException.class, e -> assertThat(e.getCause()).isSameAs(lost));
+    }
+
+    /** Self-falsification: an ordinary SQL error must not become an outage just because the rollback also failed. */
+    @Test
+    void ordinarySqlErrorMaskedByAFailedRollbackStaysInternal() {
+        var grammar = new InvalidDataAccessResourceUsageException("bad SQL");
+        var rollbackFailure = new JpaSystemException(new TransactionException("Unable to rollback against JDBC Connection"));
+        when(repository.findPatient(1)).thenThrow(grammar);
+        doThrow(rollbackFailure).when(txManager).rollback(any());
+
+        assertThatThrownBy(() -> service.getPatient(1)).isSameAs(rollbackFailure);
+        assertOneCall("getPatient", "INTERNAL");
+    }
+
+    @Test
+    void translateUsesTheApplicationExceptionOfATransactionSystemException() {
+        var lost = new DataAccessResourceFailureException("lost");
+        var tse = new TransactionSystemException("Could not roll back");
+        tse.initApplicationException(lost);
+        assertThat(DefaultLabResultQueryService.translate(tse, null))
+                .isInstanceOfSatisfying(ServiceUnavailableException.class, e -> assertThat(e.getCause()).isSameAs(lost));
+
+        var ordinary = new TransactionSystemException("Could not roll back");
+        ordinary.initApplicationException(new DataIntegrityViolationException("constraint"));
+        assertThat(DefaultLabResultQueryService.translate(ordinary, null)).isSameAs(ordinary);
     }
 
     @Test

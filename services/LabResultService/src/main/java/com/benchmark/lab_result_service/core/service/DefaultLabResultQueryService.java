@@ -30,6 +30,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.TransientDataAccessResourceException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.CannotCreateTransactionException;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -173,17 +174,57 @@ public class DefaultLabResultQueryService implements LabResultQueryService {
     /**
      * Runs {@code work} in the read transaction and translates database unavailability into
      * {@link ServiceUnavailableException} (§5.5). Every other exception propagates unchanged and becomes INTERNAL.
+     *
+     * <p>Chaos F2: when the connection is lost in the middle of the transaction, the callback fails with a
+     * {@link DataAccessResourceFailureException}, and then the rollback on the dead connection fails too.
+     * {@link TransactionTemplate} rethrows the <em>rollback</em> exception ({@code JpaSystemException: Unable to
+     * rollback against JDBC Connection}) and only logs the callback's. The holder keeps the callback's exception so the
+     * call is classified by what actually happened. No retry.
      */
     private <T> @Nullable T inReadTransaction(TransactionCallback<@Nullable T> work) {
+        CallbackFailure callbackFailure = new CallbackFailure();
         try {
-            return tx.execute(work);
+            return tx.execute(status -> {
+                try {
+                    return work.doInTransaction(status);
+                } catch (RuntimeException e) {
+                    callbackFailure.exception = e;
+                    throw e;
+                }
+            });
         } catch (RuntimeException e) {
-            throw translate(e);
+            throw translate(e, callbackFailure.exception);
         }
     }
 
-    static RuntimeException translate(RuntimeException thrown) {
-        return isUnavailable(thrown) ? new ServiceUnavailableException(thrown) : thrown;
+    /** Per-call holder for the exception the transaction callback threw (F2). */
+    private static final class CallbackFailure {
+        @Nullable RuntimeException exception;
+    }
+
+    /**
+     * Classifies what {@link TransactionTemplate#execute} threw.
+     *
+     * @param thrown          the exception that reached the service
+     * @param callbackFailure the exception the callback threw, if any. When it differs from {@code thrown}, the
+     *                        template replaced it with a rollback failure, and the callback's exception decides.
+     * @return a {@link ServiceUnavailableException} wrapping the unavailability cause, or {@code thrown} unchanged
+     */
+    static RuntimeException translate(RuntimeException thrown, @Nullable RuntimeException callbackFailure) {
+        if (isUnavailable(thrown)) {
+            return new ServiceUnavailableException(thrown);
+        }
+        // The rollback failed after the callback had failed: classify by the callback's exception. An ordinary SQL
+        // error masked by a failed rollback is therefore still INTERNAL (thrown is returned unchanged).
+        if (callbackFailure != null && callbackFailure != thrown && isUnavailable(callbackFailure)) {
+            return new ServiceUnavailableException(callbackFailure);
+        }
+        // The same information through Spring's own channel, when the rollback failure is a TransactionSystemException.
+        if (thrown instanceof TransactionSystemException tse && tse.getApplicationException() instanceof Throwable app
+                && isUnavailable(app)) {
+            return new ServiceUnavailableException(app);
+        }
+        return thrown;
     }
 
     /** The §5.5 list: the database cannot be reached, a connection cannot be had, or a transaction cannot begin. */
