@@ -45,3 +45,10 @@ server:
   tomcat:
     threads:
       max: 200
+
+# P2 dataset seeding and verification (contract §6.6, §6.7, §8.1), bound by seed.DatasetProperties.
+app:
+  seed:
+    enabled: false
+  dataset:
+    verify-mode: ${APP_DATASET_VERIFY_MODE:cheap}
