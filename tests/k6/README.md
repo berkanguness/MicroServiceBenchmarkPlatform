@@ -32,6 +32,22 @@ Repo kökünde PowerShell:
 
 macOS/Linux veya doğrudan k6 kullanımı: `k6 run -e BASE_URL=http://HOST:8080 -e PROTOCOL=both tests/k6/smoke.js`. PowerShell wrapper kullanılmıyorsa tarihli çıktı klasörü, `--out json=...`, `SUMMARY_PATH`, sürüm/ortam ve Actuator kayıtları ayrıca sağlanmalıdır. Doğrudan k6'nın çıkış kodu eksik işlemleri tek başına göstermez; load özetindeki `status` da kontrol edilir.
 
+## Ön kontrol ve CSV kapısı
+
+Resmî `-Mode load` koşusunda wrapper önce BaseUrl/ManagementUrl'nin mutlak HTTP(S) adresleri olduğunu; Evidence'nin `backend` olduğunu; `/actuator/info` sürüm/veri metadata'sını; Git SHA'nın aktif depo SHA'sıyla uyumunu; 64 karakterlik veri checksum'ını; ortam kaydının zorunlu alanlarını; readiness uç noktasını; ve seçilen REST/GraphQL uç noktasının 200 + JSON content-type yanıtını doğrular. `mock-only`, `smoke` ve `shakedown` kayıtları resmî ön kontrolün kapsamına girmez ve CSV kapısından geçmez.
+
+`summary.json` en az şema sürümü, completed durumu, thresholdsPassed=true, sıfır incomplete işlem, pozitif toplam işlem, tutarlı sayaçlar, geçerli Git SHA/64 karakterlik dataset checksum ve bozulmamış `qa_*` metriklerini zorunlu kılar. Eksik veya bozuk özetler `summarize.mjs` tarafından reddedilir.
+
+Resmî wrapper aynı `summarize.mjs --validate <summary.json>` yolunu koşudan sonra çalıştırır. Dolayısıyla wrapper'ın başarı kararı, CSV aktarıcısının özet kurallarıyla aynı tutarlılık kontrolünü kullanır. Ön kontrol, `tests/k6/preflight.mjs` üzerinden mevcut `decode`/`validate` sözleşme tanımlarını kullanarak REST gövdesini ve GraphQL errors/null-root/kök alan şeklini doğrular.
+
+Doğrulama kayıtları test matrisinde QA-20..24 olarak izlenir:
+
+- QA-20: timeout/connection status 0
+- QA-21: eksik GraphQL data
+- QA-22: 2xx/3xx anomalileri
+- QA-23: yanlış content-type
+- QA-24: bozuk özet/metadata
+
 ## İlk kısa deneme — benchmark değildir
 
 ```powershell

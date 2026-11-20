@@ -35,3 +35,11 @@ Kod dosyaları + test matrisi + sentetik sunucuda test altyapısı doğrulama ka
 ## Test matrisi ve takip
 
 19 maddelik ilk inceleme matrisi `docs/qa/test-matrix.md` dosyasında. Hazırlanan script ve gerçek test sonucu ayrı sütunlarda tutulur. CI, Docker, backend ve frontend bu değişiklikte değiştirilmez.
+
+## QA ön kontrol akışı
+
+1. `npm test --prefix tests/k6` ile QA-20..24 birim kontrolleri ve mevcut Node kontrolleri çalıştırılır.
+2. Backend gerçekse `/actuator/info` sürüm ve veri metadata'sı okunur; aktif Git SHA ile karşılaştırılır, dataset checksum 64 karakterlik SHA-256 olarak doğrulanır.
+3. BaseUrl/ManagementUrl mutlak HTTP(S) olarak doğrulanır; readiness ve seçilen REST/GraphQL uç noktası 200 + JSON şartıyla ön kontrol edilir.
+4. Resmî olmayan `smoke`, `shakedown` veya `mock-only` sonuçları resmî yük olarak işaretlenmez; wrapper/özet/CSV üçünde ayrı kapılar uygulanır.
+5. Yalnız tamamlanmış, threshold geçen ve tutarlı metrikleri olan `summary.json` dosyaları `summarize.mjs` ile CSV'ye geçirilir.

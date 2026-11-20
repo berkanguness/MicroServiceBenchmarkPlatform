@@ -12,6 +12,9 @@ export function config(env) {
   if (official && (!env.RUN_ID || !env.GIT_SHA || !env.DATASET_CHECKSUM || env.READY_FOR_MEASUREMENT !== 'yes')) {
     throw new Error('Ölçüm için RUN_ID/GIT_SHA/DATASET_CHECKSUM ve READY_FOR_MEASUREMENT=yes gerekli');
   }
+  if (official && env.EVIDENCE !== 'backend') throw new Error('Resmi ölçüm sadece evidence=backend olabilir');
+  if (official && !/^[0-9a-f]{7,40}$/i.test(env.GIT_SHA)) throw new Error('GIT_SHA git SHA biçiminde olmalı');
+  if (official && !/^[0-9a-f]{64}$/i.test(env.DATASET_CHECKSUM)) throw new Error('DATASET_CHECKSUM 64 karakterlik SHA-256 olmalı');
   let vus, seconds, stages;
   if (profile === 's1-200') {
     if (scenario !== 'S1') throw new Error('s1-200 yalnız S1');

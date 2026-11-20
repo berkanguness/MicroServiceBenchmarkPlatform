@@ -23,6 +23,23 @@ Ham öz kontrol kayıtları (gitignore kapsamında): `tests/k6/results/runtime-c
 
 Gerçek REST/GraphQL uçları, seed/checksum, gRPC, Docker ortamı, gerçek protokol eşdeğerliği, 50/200/500 kullanıcı kapasitesi, CPU/RAM/ağ ve %3 izleme ek yükü, UI ve runner API. Hazırlanan koda sahip olmak bu gereksinimlerin sağlandığı anlamına gelmez.
 
+## Sonraki QA aşaması — ön kontrol ve özet kapısı
+
+Node birimleri QA-20..24 kontrollerini sentetik olarak kapsar: timeout/bağlantı (status 0), eksik GraphQL data, HTTP 2xx/3xx anomalisi, yanlış content-type ve bozuk summary/metadata. Bunlar gerçek servis veya benchmark kanıtı değildir.
+
+Resmî yük koşusu, çalıştırılmadan önce Actuator metadata, aktif Git SHA, 64 karakterlik dataset checksum, mutlak base/management URL'leri, ortam kaydı, readiness ve seçilen HTTP protokolünün gerçek contract gövdesini kontrol eder. REST JSON'ı; GraphQL errors, null root ve S1 patient3 şekli mevcut sözleşme tanımlarıyla doğrulanır. Wrapper mock evidence veya metadata eksikliğiyle resmî çalışma açmaz.
+
+CSV dönüştürücüsü yalnız `schemaVersion=1`, backend evidence, official config, completed, threshold başarı, sıfır incomplete işlem, tutarlı sayaçlar ve geçerli metrikleri kabul eder. Smoke, mock, shakedown, failed veya incomplete özetleri reddeder.
+
+Tekrar doğrulama komutları:
+
+```powershell
+npm test --prefix tests/k6
+node tests/k6/unit/runtime-check.mjs <k6-exe-yolu>
+```
+
+`runtime-check.mjs` yalnız loopback mock kullanır; gerçek backend çalıştırması değildir.
+
 ## İlk gerçek koşu
 
 Berkay hazır REST sürümünü, Doruk erişilebilir ortam adresini bildirdikten sonra `tests/k6/README.md` içindeki REST smoke komutu çalıştırılır. Çıkan bulgular kaydedilir; hatalar giderilmeden karşılaştırmalı performans sonucuna geçilmez. Ortam salıdan sonra hazırlanacağından 4 Kasım için canlı demo taahhüdü yoktur.
