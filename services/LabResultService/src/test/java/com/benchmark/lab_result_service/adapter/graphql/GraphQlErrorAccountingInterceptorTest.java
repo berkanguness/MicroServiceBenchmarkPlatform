@@ -63,7 +63,7 @@ class GraphQlErrorAccountingInterceptorTest {
      * The exception surfaces on a pool thread (an async data fetcher), so the resolver runs there, not on the thread
      * that sent the request. The holder is reached through the GraphQL context, not a thread-local: recorded once.
      */
-    @Test
+    @org.junit.jupiter.api.RepeatedTest(25)
     void anExceptionResolvedOnAnotherThreadIsRecordedOnce() {
         ServiceUnavailableException failure = new ServiceUnavailableException(new SQLTransientConnectionException("x"));
         WebGraphQlHandler handler = handler(Map.of("patientSummary", async(() -> { throw failure; })));
@@ -213,8 +213,29 @@ class GraphQlErrorAccountingInterceptorTest {
         return new DefaultExecutionGraphQlService(source);
     }
 
+    /**
+     * A data fetcher whose result (or exception) is produced on a pool thread. The pool thread completes the future
+     * only after graphql-java has attached its continuation ({@code getNumberOfDependents() > 0}), so the
+     * continuation, and with it the exception resolver, deterministically runs on the pool thread. A plain
+     * {@code supplyAsync} can complete first, and the continuation then runs on the calling thread (seen as a flaky
+     * run before this helper).
+     */
     private <T> DataFetcher<CompletableFuture<T>> async(java.util.function.Supplier<T> body) {
-        return env -> CompletableFuture.supplyAsync(body, pool);
+        return env -> {
+            CompletableFuture<T> future = new CompletableFuture<>();
+            pool.execute(() -> {
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                while (future.getNumberOfDependents() == 0 && System.nanoTime() < deadline) {
+                    Thread.onSpinWait();
+                }
+                try {
+                    future.complete(body.get());
+                } catch (RuntimeException e) {
+                    future.completeExceptionally(e);
+                }
+            });
+            return future;
+        };
     }
 
     private static WebGraphQlResponse execute(WebGraphQlHandler handler, String document) {
