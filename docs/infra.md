@@ -46,7 +46,6 @@ docker compose down       # durdur (veri korunur)
 - **Port zaten kullanımda hatası:** Aynı portu kullanan başka bir program var, onu kapat.
 - **CPU/Bellek panelleri "No data" gösteriyor:** cAdvisor, diğer konteynerlerle aynı anda başlayınca onları görmeyebilir. `docker compose restart cadvisor` yazıp bir dakika bekle.
 
-## Bilinen sınırlamalar (Docker Desktop)
-- cAdvisor, Docker Desktop'ta konteyner bazlı metrik için `--containerd-namespace=moby` bayrağına ihtiyaç duyar (`docker-compose.yml`'de ekli).
-- Docker Desktop'ta ağ trafiği (gelen ve giden) konteyner bazında değil, tüm Docker ortamı için görünür. Linux sunucuda konteyner bazında gelmesi beklenir.
-- Konteyner isimleri yerine imaj adları (`image` etiketi) gösterilir.
+## cAdvisor notları
+- cAdvisor v0.61.1 kullanılır (Docker 29 ile uyumlu). Docker ve containerd soketlerine `--docker` ve `--containerd` bayraklarıyla bağlanır (`docker-compose.yml`'de ekli).
+- Dashboard'da konteynerler `lab-grafana` gibi adlarıyla görünür. Ağ trafiği konteyner başına (`eth0`, gelen ve giden) ölçülür.
