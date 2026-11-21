@@ -106,12 +106,19 @@
         {
           "editorMode": "code",
           "expr": "rate(container_network_receive_bytes_total{id=\"/\",interface=\"eth0\"}[1m])",
-          "legendFormat": "Docker ortamı (eth0)",
-          "range": true,
-          "refId": "A"
+          "legendFormat": "Gelen (eth0)",
+"range": true,
+"refId": "A"
+},
+{
+"editorMode": "code",
+"expr": "rate(container_network_transmit_bytes_total{id=\"/\",interface=\"eth0\"}[1m])",
+"legendFormat": "Giden (eth0)",
+"range": true,
+"refId": "B"
         }
       ],
-      "title": "Ağ Trafiği (gelen, tüm Docker ortamı)",
+      "title": "Ağ Trafiği (gelen ve giden, tüm Docker ortamı)",
       "type": "timeseries"
     },
     {
