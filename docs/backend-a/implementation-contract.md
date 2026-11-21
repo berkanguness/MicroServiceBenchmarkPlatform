@@ -883,9 +883,9 @@ Files: `src/main/resources/application.yaml` (default), `application-seed.yaml`,
 | `app.dataset.verify-mode` (A) | — | `${APP_DATASET_VERIFY_MODE:cheap}` | | | | | `off` for slice tests; ITs set `cheap`/`full` explicitly |
 
 Notes:
-- `bench-nomon` = observations off + all meters denied + Prometheus export off + gRPC observation off (R1/F14 full definition). `/actuator/prometheus` returns 404 and `lab.service.calls` becomes a no-op meter. What the off-arm does **not** remove (JVM itself, external cAdvisor/Prometheus host load) is stated in QA's D13 method (§12 Q7).
+- `bench-nomon` = observations off + all meters denied + Prometheus export off + gRPC observation off (R1/F14 full definition). `/actuator/prometheus` returns 404 and `lab.service.calls` becomes a no-op meter. What the off-arm does **not** remove (JVM itself, external cAdvisor/Prometheus host load) is stated in QA's D13 method (§12 Q7). **P6 (`REPRODUCED`, `ObservabilityNomonIT`):** under `bench,bench-nomon` no `PrometheusMeterRegistry` exists, `MeterRegistry.getMeters()` stays empty after REST, GraphQL and error requests (every meter, `lab.service.calls`/`lab.errors`/`hikaricp.*`/`jvm.*` included, is a no-op), and every `Observation` is a no-op. The off-arm keeps the management child context (health/info on 8081, needed for readiness gating and run metadata) and the HTTP observation filter itself, which then only sees no-op observations.
 - Percentile histograms stay off (no `management.metrics.distribution.percentiles-histogram.*`). k6 is the source of truth for p95/p99.
-- `management.server.port=8081` starts a child context with its own Tomcat and thread pool (R7; shared CPU).
+- `management.server.port=8081` starts a child context with its own Tomcat and thread pool (R7; shared CPU). From P6 the server port serves no `/actuator/**` (404, `ObservabilityBenchIT`); probes, info and Prometheus are only on 8081. The test profile sets `management.server.port: 0` (random); tests read `local.management.port`.
 - CORS (R3): `config.CorsConfig` registers one `WebMvcConfigurer` mapping for `/api/**` and `/graphql`, methods `GET, POST, OPTIONS`, origins from `app.cors.allowed-origins` (comma-separated). Two independent conditions: (1) the class is annotated **`@Profile("!bench & !bench-nomon")`**, so under `bench`/`bench-nomon` the configurer bean does not exist; (2) outside bench it registers a mapping only when the list is non-empty. Condition (1) does not depend on property-source precedence: an environment variable `APP_CORS_ALLOWED_ORIGINS` outranks the empty `app.cors.allowed-origins` in `application-bench.yaml` (referee `REPRODUCED` with Spring Core 7.0.9), so a property value alone cannot guarantee "off in bench" (P0-F3). The only way to get CORS in a benchmark container is to drop the bench profile, which `/actuator/info` `activeProfiles` records. The global CORS configuration also reaches GraphQL's `RouterFunctionMapping` (referee `REPRODUCED`, Spring MVC 7.0.9). `spring.graphql.cors.*` (exists, `REPRODUCED`) is **not** used, so there is one mechanism. `Timing-Allow-Origin`/`exposedHeaders` are added only if Frontend asks (§12 Q1). From P5 on `CorsConfigTest` exercises Spring GraphQL's real `/graphql` endpoint (preflight and a real `POST`), not a stand-in.
 - GraphQL introspection (P5, `REPRODUCED` javap + test): Boot 4.1.1 applies `spring.graphql.schema.introspection.enabled=false` through graphql-java's JVM-wide `Introspection.enabledJvmWide(false)` and never switches it back on. With one application context per JVM (production, every profile) this is exactly the table above; in a test JVM, a context with introspection off disables it for every later context, so `GraphQlProfilesTest` checks `docs` by its bound properties.
 - Logging: no SQL logging and no per-request access log in any profile. Default Logback console appender.
@@ -952,6 +952,7 @@ Already present and unchanged: actuator, data-jpa, graphql, webmvc, postgresql (
         <execution>
             <goals><goal>build-info</goal></goals>
             <configuration>
+                <time>${maven.build.timestamp}</time>   <!-- P6: real build time, see §11.2 notes -->
                 <additionalProperties>
                     <git.sha>${git.sha}</git.sha>
                 </additionalProperties>
@@ -1061,6 +1062,12 @@ Common tag `application="lab-result-service"`. No percentile histograms. Scrape 
 | `lab.runtime.jvm.{inputArguments,gcNames,availableProcessors,maxHeapBytes}` | `RuntimeMXBean`, `GarbageCollectorMXBean`s, `Runtime` |
 
 QA saves `GET :8081/actuator/info` next to every run's raw output (Talimat 1, 11).
+
+P6 implementation decisions (`config.LabInfoContributor`, `REPRODUCED` by `InfoEndpointIT`/`ObservabilityBenchIT`):
+- `lab.dataset.*` is read from `dataset_meta` (`name = 'ym491'`) on each `/actuator/info` call and at no other time: one autocommit query on a pool connection, so the endpoint adds no work to measured requests unless it is itself called during a run (QA calls it before/after a run; Prometheus never calls it). `verifyMode`/`verifiedAt` come from `seed.DatasetVerifier` (`verifiedAt` = when the startup verification passed; absent when the mode is `off`). Two extra keys: `lab.dataset.present` (whether the row exists) and, only on a database error, `lab.dataset.error` (exception class, never the message); the endpoint does not fail. Without a manifest row the dataset values are `null`, which the actuator's JSON leaves out, so only `present=false` and `verifyMode` remain.
+- `lab.runtime.tomcat.*`/`http2Enabled`/`compressionEnabled` are the bound `TomcatServerProperties`/`ServerProperties` beans; `keepAliveTimeout` is an ISO-8601 duration (`PT1M` under bench; absent outside bench, where Tomcat uses its connection timeout). `lab.runtime.grpc.port` is the configured `spring.grpc.server.port` (0 = random in tests), `executorThreads` the fixed default text until B's provider exists (§12 Q3).
+- `lab.runtime.jvm.inputArguments`: the value of any `-D…password|secret|token|credential…=` argument is replaced by `******`.
+- `build.*`: the module POM now has `<name>lab-result-service</name>` (it was an empty `<name/>`, so `build.name` was missing), and `build-info` sets `<time>${maven.build.timestamp}</time>`: the inherited `project.build.outputTimestamp` is the fixed `1980-02-01T00:00:00Z` of reproducible builds (effective POM, `DIRECT SOURCE`), useless as run metadata.
 
 ### 11.3 `payload-sizes.json` (R2)
 

@@ -1,0 +1,35 @@
+# Profile "bench" (contract §8.1, R1): the measured configuration. Activated as bench,seed (monitoring-on arm) or
+# bench,bench-nomon,seed (monitoring-off arm, application-bench-nomon.yaml). Everything not listed here comes from
+# application.yaml. CORS is off whatever app.cors.allowed-origins says: config.CorsConfig is
+# @Profile("!bench & !bench-nomon").
+server:
+  # R1: HTTP/1.1 keep-alive connections are never closed by a request count (Tomcat default 100) and stay open 60 s
+  # between requests, so k6's connection reuse is not interrupted mid-run. HTTP/2 and compression stay off (recorded
+  # explicitly; both are Boot defaults).
+  tomcat:
+    max-keep-alive-requests: -1
+    keep-alive-timeout: 60s
+  http2:
+    enabled: false
+  compression:
+    enabled: false
+
+spring:
+  # No schema introspection and no GraphiQL in a measured run (same as the default profile; recorded explicitly).
+  graphql:
+    schema:
+      introspection:
+        enabled: false
+    graphiql:
+      enabled: false
+  grpc:
+    server:
+      # RFC 0001 §3.3: no reflection service in a measured run (gRPC clients use the .proto explicitly).
+      reflection:
+        enabled: false
+
+management:
+  prometheus:
+    metrics:
+      export:
+        enabled: true
