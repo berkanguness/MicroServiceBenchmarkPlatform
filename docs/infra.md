@@ -17,7 +17,7 @@ Bu doküman, projenin Docker ortamını (PostgreSQL + Prometheus + cAdvisor + Gr
 | `LAB_DB_PASSWORD` | PostgreSQL (`labdb`) kullanıcısı `lab`'ın şifresi |
 | `GRAFANA_ADMIN_PASSWORD` | Grafana `admin` kullanıcısının şifresi |
 
-`.env` dosyası `.gitignore`'dadır, **asla commit'lenmez**. Eksik değişken varsa `docker compose up` açıklayıcı bir hata verir.
+`.env` dosyası `.gitignore`'dadır, **asla commit'lenmez**. `GRAFANA_ADMIN_PASSWORD` eksikse `docker compose up` açıklayıcı bir hata verir. `LAB_DB_PASSWORD` eksikse Compose yalnızca uyarı verir ve PostgreSQL ilk açılışta hata verir, bu yüzden ikisini de doldur.
 
 ## Çalıştırma
 ```
@@ -39,13 +39,16 @@ docker compose down       # durdur (veri korunur)
 - Kullanıcı: `admin`
 - Şifre: `.env` içindeki `GRAFANA_ADMIN_PASSWORD`
 - Prometheus veri kaynağı ve **Konteyner İzleme** dashboard'u otomatik yüklenir (provisioning), elle kurulum gerekmez.
-- Dashboard dosyadan yüklendiği için arayüzden kaydedilen değişiklikler kalıcı olmaz. Değişiklik için `monitoring/grafana/provisioning/dashboards/konteyner-izleme.json` düzenlenir.
+- Dashboard dosyadan yüklendiği için arayüzden kaydedilemez (Grafana "Cannot save provisioned dashboard" der). Değişiklik için JSON'u dışa aktarıp `monitoring/grafana/provisioning/dashboards/konteyner-izleme.json` dosyasına yazın.
 
 ## Sık karşılaşılan durumlar
-- **Şifreyi `.env`'de değiştirdim ama giriş çalışmıyor:** Grafana ve PostgreSQL şifreyi ilk açılışta volume'a yazar. Sıfırlamak için `docker compose down -v` (tüm verileri siler) ve tekrar `up -d`.
+- **Şifreyi `.env`'de değiştirdim ama giriş çalışmıyor:** Grafana şifreyi ilk açılışta kendi volume'una yazar. Verileri silmeden sıfırlamak için: `docker compose exec grafana grafana cli admin reset-admin-password '<yeni-şifre>'`. PostgreSQL şifresi de ilk açılışta yazılır, onu değiştirmek veri kaybı gerektirir (aşağıdaki "Ortamı tamamen sıfırlama" bölümüne bak).
 - **Port zaten kullanımda hatası:** Aynı portu kullanan başka bir program var, onu kapat.
-- **CPU/Bellek panelleri "No data" gösteriyor:** cAdvisor, diğer konteynerlerle aynı anda başlayınca onları görmeyebilir. `docker compose restart cadvisor` yazıp bir dakika bekle.
+- **CPU/Bellek panelleri "No data" gösteriyor:** cAdvisor'un Docker/containerd'e bağlanıp bağlanmadığına bak: `docker compose logs cadvisor | grep "container factory"` (Windows PowerShell'de `grep` yerine `Select-String "container factory"`). docker veya containerd satırında "failed" yazıyorsa konteyner bazlı metrik gelmez.
 
 ## cAdvisor notları
 - cAdvisor v0.61.1 kullanılır (Docker 29 ile uyumlu). Docker ve containerd soketlerine `--docker` ve `--containerd` bayraklarıyla bağlanır (`docker-compose.yml`'de ekli).
 - Dashboard'da konteynerler `lab-grafana` gibi adlarıyla görünür. Ağ trafiği konteyner başına (`eth0`, gelen ve giden) ölçülür.
+
+## Ortamı tamamen sıfırlama
+`docker compose down -v` tüm volume'ları siler (PostgreSQL ve Grafana verisi dahil). Sadece gerçekten sıfırdan başlamak istediğinde kullan, sonra `docker compose up -d` ile yeniden kur.
