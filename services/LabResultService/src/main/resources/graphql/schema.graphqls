@@ -1,0 +1,37 @@
+type Query {
+  patient(id: ID!): Patient
+  "Scenario 1 — profile + most recent report with its items"
+  patientSummary(patientId: ID!): PatientSummary
+  "Scenario 2 — full lab history"
+  patientLabHistory(patientId: ID!): PatientLabHistory
+}
+
+type Patient {
+  id: ID!
+  tcNo: String!
+  fullName: String!
+  "ISO-8601 date, yyyy-MM-dd"
+  birthDate: String!
+  bloodType: String!
+}
+
+type LabReport {
+  id: ID!
+  doctorName: String!
+  sampleType: String!
+  "ISO-8601 instant, UTC, e.g. 2025-12-31T17:03:21Z"
+  createdAt: String!
+  items: [LabTestItem!]!
+}
+
+type LabTestItem {
+  id: ID!
+  testCode: String!
+  testName: String!
+  resultValue: Float!
+  unit: String!
+  isCritical: Boolean!
+}
+
+type PatientSummary { patient: Patient!  latestReport: LabReport }
+type PatientLabHistory { patient: Patient!  reports: [LabReport!]! }
