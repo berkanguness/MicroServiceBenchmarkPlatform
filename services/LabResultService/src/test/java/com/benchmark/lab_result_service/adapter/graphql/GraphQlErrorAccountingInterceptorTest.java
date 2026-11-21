@@ -129,6 +129,27 @@ class GraphQlErrorAccountingInterceptorTest {
         verifyNoMoreInteractions(recorder);
     }
 
+    /**
+     * Smoke finding (P5): with introspection off (default/bench), an introspection query is answered with
+     * graphql-java's {@code IntrospectionDisabled} error. It is a rejected client request: INVALID_ARGUMENT without
+     * cause, not INTERNAL (which logs at ERROR with a stack trace). Boot switches introspection off JVM-wide, so the
+     * test restores the previous JVM-wide value.
+     */
+    @Test
+    void disabledIntrospectionIsInvalidArgumentWithoutCause() {
+        boolean previous = graphql.introspection.Introspection.enabledJvmWide(false);
+        try {
+            WebGraphQlResponse response = execute(handler(Map.of()), "{ __schema { queryType { name } } }");
+
+            assertThat(response.getErrors()).singleElement()
+                    .satisfies(e -> assertThat(e.getErrorType()).hasToString("IntrospectionDisabled"));
+        } finally {
+            graphql.introspection.Introspection.enabledJvmWide(previous);
+        }
+        verify(recorder).record(Protocol.GRAPHQL, ErrorCode.INVALID_ARGUMENT, null);
+        verifyNoMoreInteractions(recorder);
+    }
+
     /** An error that did not come from our resolver (none is expected) must not leave a failed request unrecorded. */
     @Test
     void anErrorNotBuiltByTheResolverIsRecordedAsInternal() {

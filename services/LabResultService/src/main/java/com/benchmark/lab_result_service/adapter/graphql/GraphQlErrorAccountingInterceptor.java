@@ -22,7 +22,9 @@ import reactor.core.publisher.Mono;
  * <ul>
  *   <li>field errors from the holder (with their exception as cause);</li>
  *   <li>request errors whose classification is graphql-java {@code InvalidSyntax} or {@code ValidationError}
- *       (they never reach the resolver) → {@code INVALID_ARGUMENT}, no cause;</li>
+ *       (they never reach the resolver) → {@code INVALID_ARGUMENT}, no cause; likewise {@code IntrospectionDisabled},
+ *       graphql-java's answer to an introspection query while introspection is off (default and bench profiles):
+ *       a rejected client request, not a server fault;</li>
  *   <li>any other error in the response that carries no {@code extensions.code} of ours (none is expected) →
  *       {@code INTERNAL}, so a failed request can never go unrecorded;</li>
  *   <li>the execution itself failing (no response) → {@code INTERNAL}.</li>
@@ -32,6 +34,9 @@ import reactor.core.publisher.Mono;
  */
 @Component
 public class GraphQlErrorAccountingInterceptor implements WebGraphQlInterceptor {
+
+    /** Classification name of graphql-java's {@code IntrospectionDisabledError} (graphql-java 25). */
+    static final String INTROSPECTION_DISABLED = "IntrospectionDisabled";
 
     private final LabErrorRecorder recorder;
 
@@ -62,7 +67,7 @@ public class GraphQlErrorAccountingInterceptor implements WebGraphQlInterceptor 
         }
         for (ResponseError error : response.getErrors()) {
             ErrorClassification type = error.getErrorType();
-            if (type == graphql.ErrorType.InvalidSyntax || type == graphql.ErrorType.ValidationError) {
+            if (isRequestError(type)) {
                 if (moreSevere(ErrorCode.INVALID_ARGUMENT, code)) {
                     code = ErrorCode.INVALID_ARGUMENT;
                     cause = null;
@@ -77,6 +82,13 @@ public class GraphQlErrorAccountingInterceptor implements WebGraphQlInterceptor 
         if (code != null) {
             recorder.record(Protocol.GRAPHQL, code, cause);
         }
+    }
+
+    /** Errors of the request itself, raised by graphql-java before or instead of any data fetcher. */
+    static boolean isRequestError(ErrorClassification type) {
+        return type == graphql.ErrorType.InvalidSyntax || type == graphql.ErrorType.ValidationError
+                // graphql.introspection.IntrospectionDisabledError: ErrorClassification.errorClassification(name)
+                || INTROSPECTION_DISABLED.equals(type.toString());
     }
 
     static boolean moreSevere(ErrorCode candidate, @Nullable ErrorCode current) {
