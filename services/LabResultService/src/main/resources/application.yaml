@@ -1,5 +1,6 @@
-# LabResultService — default profile (contract §8.1). Keys of later phases (management/metrics) are added by the phase
-# that introduces them.
+# LabResultService — default profile (contract §8.1). Management, probes, /actuator/info and metrics keys since P6
+# (§8.1, §8.3, §11). Benchmark settings live in application-bench.yaml, the monitoring-off overlay in
+# application-bench-nomon.yaml.
 spring:
   application:
     name: lab-result-service
@@ -64,6 +65,36 @@ server:
   tomcat:
     threads:
       max: 200
+
+# P6 (contract §8.1, §8.3, §11): actuator on its own port. management.server.port starts a child context with its own
+# Tomcat and thread pool (R7; shares the CPU), so 8080 serves no /actuator/** at all. Exposed: health (with the
+# liveness/readiness probe groups), info (§11.2, LabInfoContributor) and prometheus (§11.1). Every meter carries the
+# common tag application="lab-result-service". No percentile histograms (k6 is the source of truth for p95/p99).
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  info:
+    java:
+      enabled: true
+    os:
+      enabled: true
+    process:
+      enabled: true
+  metrics:
+    tags:
+      application: lab-result-service
+  prometheus:
+    metrics:
+      export:
+        enabled: true
 
 # P2 dataset seeding and verification (contract §6.6, §6.7, §8.1), bound by seed.DatasetProperties.
 # P4 CORS (contract §8.1 R3), read by config.CorsConfig: comma-separated origins, empty = CORS off. Ignored under the

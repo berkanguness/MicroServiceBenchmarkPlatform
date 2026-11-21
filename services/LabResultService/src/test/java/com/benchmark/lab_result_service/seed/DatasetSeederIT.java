@@ -231,7 +231,8 @@ class DatasetSeederIT {
     }
 
     private static int readinessOverHttp(ConfigurableApplicationContext ctx) throws Exception {
-        String port = ctx.getEnvironment().getRequiredProperty("local.server.port");
+        // P6: probes live on the management port (contract §8.3); the server port serves no /actuator/** any more
+        String port = ctx.getEnvironment().getRequiredProperty("local.management.port");
         try (HttpClient client = HttpClient.newHttpClient()) {
             HttpResponse<String> response = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/actuator/health/readiness")).build(),
