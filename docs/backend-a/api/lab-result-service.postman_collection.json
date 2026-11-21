@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "6b1f4c2e-4f3a-4b8e-9c55-0d4912026a04",
-    "name": "LabResultService REST (YM491)",
-    "description": "REST adapter of LabResultService (contract docs/backend-a/implementation-contract.md §7.1/§7.4). Port 8080. Dataset: P2 seeder (profile seed). S1 = patient 3 summary, S2 = patient 1 lab-history.",
+    "name": "LabResultService REST + GraphQL (YM491)",
+    "description": "REST adapter (contract docs/backend-a/implementation-contract.md §7.1/§7.4) and GraphQL adapter (§7.2/§7.4) of LabResultService. Port 8080. Dataset: P2 seeder (profile seed). S1 = patient 3 summary, S2 = patient 1 lab-history, S2b = GraphQL over-fetch experiment (same service call as S2, test name + result only). GraphQL requests send Content-Type and Accept application/json with {query, operationName, variables}, as QA's k6 client does.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -502,6 +502,445 @@
         },
         "description": ""
       }
+    },
+    {
+      "name": "GraphQL",
+      "description": "POST /graphql (contract §7.2). S1/S2/S2b verbatim as QA uses them; the rest are Postman-only samples. Field errors return HTTP 200 with errors[].extensions.code.",
+      "item": [
+        {
+          "name": "GraphQL S1 — patient 3 summary (Scenario 1)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type application/json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json/));",
+                  "const body = pm.response.json();",
+                  "pm.test('no errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "const checkPatient = (p, id) => {",
+                  "  pm.expect(Object.keys(p)).to.eql(['id','tcNo','fullName','birthDate','bloodType']);",
+                  "  pm.expect(p.id).to.eql(id); // GraphQL ID is a JSON string (D11)",
+                  "  pm.expect(p.tcNo).to.match(/^\\d{11}$/); pm.expect(p.fullName).to.be.a('string');",
+                  "  pm.expect(p.birthDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/);",
+                  "  pm.expect(p.bloodType).to.be.oneOf(['A+','A-','B+','B-','AB+','AB-','O+','O-']);",
+                  "};",
+                  "const checkReport = (r) => {",
+                  "  pm.expect(Object.keys(r)).to.eql(['id','doctorName','sampleType','createdAt','items']);",
+                  "  pm.expect(r.id).to.be.a('string');",
+                  "  pm.expect(r.createdAt).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/);",
+                  "  pm.expect(r.items).to.have.lengthOf(10);",
+                  "  let last = 0;",
+                  "  r.items.forEach(i => {",
+                  "    pm.expect(Object.keys(i)).to.eql(['id','testCode','testName','resultValue','unit','isCritical']);",
+                  "    pm.expect(Number(i.id)).to.be.above(last); last = Number(i.id);",
+                  "    pm.expect(i.resultValue).to.be.a('number');",
+                  "    pm.expect(i.isCritical).to.be.a('boolean');",
+                  "  });",
+                  "};",
+                  "const s = body.data.patientSummary;",
+                  "pm.test('patient 3', () => checkPatient(s.patient, '3'));",
+                  "pm.test('latestReport = report 101 with items 1001..1010', () => { checkReport(s.latestReport); pm.expect(s.latestReport.id).to.eql('101'); pm.expect(s.latestReport.items.map(i => i.id)).to.eql(['1001','1002','1003','1004','1005','1006','1007','1008','1009','1010']); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"query S1($id: ID!) {\\n  patientSummary(patientId: $id) {\\n    patient { id tcNo fullName birthDate bloodType }\\n    latestReport { id doctorName sampleType createdAt\\n      items { id testCode testName resultValue unit isCritical } }\\n  }\\n}\",\n  \"operationName\": \"S1\",\n  \"variables\": {\n    \"id\": \"3\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/graphql",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            },
+            "description": "Contract §7.2 S1 verbatim, variables {\"id\":\"3\"}. Same service call (getPatientSummary) and statements as REST S1."
+          }
+        },
+        {
+          "name": "GraphQL S2 — patient 1 lab-history (Scenario 2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type application/json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json/));",
+                  "const body = pm.response.json();",
+                  "pm.test('no errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "const checkPatient = (p, id) => {",
+                  "  pm.expect(Object.keys(p)).to.eql(['id','tcNo','fullName','birthDate','bloodType']);",
+                  "  pm.expect(p.id).to.eql(id); // GraphQL ID is a JSON string (D11)",
+                  "  pm.expect(p.tcNo).to.match(/^\\d{11}$/); pm.expect(p.fullName).to.be.a('string');",
+                  "  pm.expect(p.birthDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/);",
+                  "  pm.expect(p.bloodType).to.be.oneOf(['A+','A-','B+','B-','AB+','AB-','O+','O-']);",
+                  "};",
+                  "const checkReport = (r) => {",
+                  "  pm.expect(Object.keys(r)).to.eql(['id','doctorName','sampleType','createdAt','items']);",
+                  "  pm.expect(r.id).to.be.a('string');",
+                  "  pm.expect(r.createdAt).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/);",
+                  "  pm.expect(r.items).to.have.lengthOf(10);",
+                  "  let last = 0;",
+                  "  r.items.forEach(i => {",
+                  "    pm.expect(Object.keys(i)).to.eql(['id','testCode','testName','resultValue','unit','isCritical']);",
+                  "    pm.expect(Number(i.id)).to.be.above(last); last = Number(i.id);",
+                  "    pm.expect(i.resultValue).to.be.a('number');",
+                  "    pm.expect(i.isCritical).to.be.a('boolean');",
+                  "  });",
+                  "};",
+                  "const h = body.data.patientLabHistory;",
+                  "pm.test('patient 1', () => checkPatient(h.patient, '1'));",
+                  "pm.test('100 reports, createdAt DESC then id DESC, 10 items each', () => {",
+                  "  pm.expect(h.reports).to.have.lengthOf(100);",
+                  "  h.reports.forEach(checkReport);",
+                  "  for (let k = 1; k < h.reports.length; k++) {",
+                  "    const a = h.reports[k - 1], b = h.reports[k];",
+                  "    pm.expect(a.createdAt > b.createdAt || (a.createdAt === b.createdAt && Number(a.id) > Number(b.id))).to.be.true;",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"query S2($id: ID!) {\\n  patientLabHistory(patientId: $id) {\\n    patient { id tcNo fullName birthDate bloodType }\\n    reports { id doctorName sampleType createdAt\\n      items { id testCode testName resultValue unit isCritical } }\\n  }\\n}\",\n  \"operationName\": \"S2\",\n  \"variables\": {\n    \"id\": \"1\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/graphql",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            },
+            "description": "Contract §7.2 S2 verbatim, variables {\"id\":\"1\"}. Same service call (getPatientLabHistory) and statements as REST S2."
+          }
+        },
+        {
+          "name": "GraphQL S2b — patient 1, test name + result only (over-fetch experiment)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type application/json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json/));",
+                  "const body = pm.response.json();",
+                  "pm.test('no errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "const h = body.data.patientLabHistory;",
+                  "pm.test('only reports selected', () => pm.expect(Object.keys(h)).to.eql(['reports']));",
+                  "pm.test('100 reports × 10 items of {testName, resultValue}', () => {",
+                  "  pm.expect(h.reports).to.have.lengthOf(100);",
+                  "  h.reports.forEach(r => { pm.expect(Object.keys(r)).to.eql(['items']); pm.expect(r.items).to.have.lengthOf(10);",
+                  "    r.items.forEach(i => { pm.expect(Object.keys(i)).to.eql(['testName','resultValue']); pm.expect(i.resultValue).to.be.a('number'); }); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"query S2b($id: ID!) {\\n  patientLabHistory(patientId: $id) { reports { items { testName resultValue } } }\\n}\",\n  \"operationName\": \"S2b\",\n  \"variables\": {\n    \"id\": \"1\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/graphql",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            },
+            "description": "Contract §7.2 S2b verbatim, variables {\"id\":\"1\"}. Calls the SAME getPatientLabHistory as S2 (same 3 statements, rows and assembly); only serialization differs."
+          }
+        },
+        {
+          "name": "GraphQL patient(id: \"3\")",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type application/json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json/));",
+                  "const body = pm.response.json();",
+                  "pm.test('no errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "const checkPatient = (p, id) => {",
+                  "  pm.expect(Object.keys(p)).to.eql(['id','tcNo','fullName','birthDate','bloodType']);",
+                  "  pm.expect(p.id).to.eql(id); // GraphQL ID is a JSON string (D11)",
+                  "  pm.expect(p.tcNo).to.match(/^\\d{11}$/); pm.expect(p.fullName).to.be.a('string');",
+                  "  pm.expect(p.birthDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/);",
+                  "  pm.expect(p.bloodType).to.be.oneOf(['A+','A-','B+','B-','AB+','AB-','O+','O-']);",
+                  "};",
+                  "const checkReport = (r) => {",
+                  "  pm.expect(Object.keys(r)).to.eql(['id','doctorName','sampleType','createdAt','items']);",
+                  "  pm.expect(r.id).to.be.a('string');",
+                  "  pm.expect(r.createdAt).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/);",
+                  "  pm.expect(r.items).to.have.lengthOf(10);",
+                  "  let last = 0;",
+                  "  r.items.forEach(i => {",
+                  "    pm.expect(Object.keys(i)).to.eql(['id','testCode','testName','resultValue','unit','isCritical']);",
+                  "    pm.expect(Number(i.id)).to.be.above(last); last = Number(i.id);",
+                  "    pm.expect(i.resultValue).to.be.a('number');",
+                  "    pm.expect(i.isCritical).to.be.a('boolean');",
+                  "  });",
+                  "};",
+                  "pm.test('patient 3', () => checkPatient(body.data.patient, '3'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"{ patient(id: \\\"3\\\") { id tcNo fullName birthDate bloodType } }\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/graphql",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            },
+            "description": "Postman-only sample (§7.2): getPatient."
+          }
+        },
+        {
+          "name": "GraphQL patient 2 lab-history — empty",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type application/json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json/));",
+                  "const body = pm.response.json();",
+                  "pm.test('no errors', () => pm.expect(body.errors).to.be.undefined);",
+                  "pm.test('patient 2, reports []', () => { pm.expect(body.data.patientLabHistory.patient.id).to.eql('2'); pm.expect(body.data.patientLabHistory.reports).to.eql([]); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"{ patientLabHistory(patientId: \\\"2\\\") { patient { id } reports { id } } }\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/graphql",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            },
+            "description": "Postman-only sample (§7.2): patient 2 has no reports."
+          }
+        },
+        {
+          "name": "GraphQL not found — patient 1001",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type application/json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json/));",
+                  "const body = pm.response.json();",
+                  "pm.test('data.patientLabHistory is null', () => pm.expect(body.data.patientLabHistory).to.be.null);",
+                  "pm.test('exactly one error', () => pm.expect(body.errors).to.have.lengthOf(1));",
+                  "pm.test('extensions.code = PATIENT_NOT_FOUND, classification = NOT_FOUND', () => { pm.expect(body.errors[0].extensions.code).to.eql('PATIENT_NOT_FOUND'); pm.expect(body.errors[0].extensions.classification).to.eql('NOT_FOUND'); });",
+                  "pm.test('message', () => pm.expect(body.errors[0].message).to.eql('Patient 1001 not found'));",
+                  "pm.test('path', () => pm.expect(body.errors[0].path).to.eql(['patientLabHistory']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"{ patientLabHistory(patientId: \\\"1001\\\") { patient { id } } }\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/graphql",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            },
+            "description": "Postman-only sample (§7.2): field null, NOT_FOUND / PATIENT_NOT_FOUND, HTTP 200."
+          }
+        },
+        {
+          "name": "GraphQL bad id — \"abc\"",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type application/json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json/));",
+                  "const body = pm.response.json();",
+                  "pm.test('data.patientSummary is null', () => pm.expect(body.data.patientSummary).to.be.null);",
+                  "pm.test('exactly one error', () => pm.expect(body.errors).to.have.lengthOf(1));",
+                  "pm.test('extensions.code = INVALID_ARGUMENT, classification = BAD_REQUEST', () => { pm.expect(body.errors[0].extensions.code).to.eql('INVALID_ARGUMENT'); pm.expect(body.errors[0].extensions.classification).to.eql('BAD_REQUEST'); });",
+                  "pm.test('message', () => pm.expect(body.errors[0].message).to.eql('patientId must be a positive 64-bit integer'));",
+                  "pm.test('path', () => pm.expect(body.errors[0].path).to.eql(['patientSummary']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"{ patientSummary(patientId: \\\"abc\\\") { patient { id } } }\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/graphql",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            },
+            "description": "Postman-only sample (§7.2): PatientIds.parse rejects it like REST; BAD_REQUEST / INVALID_ARGUMENT, HTTP 200."
+          }
+        }
+      ]
     }
   ]
 }
