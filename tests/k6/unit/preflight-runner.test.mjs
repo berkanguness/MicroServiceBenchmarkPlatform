@@ -62,4 +62,3 @@ for (const readiness of ['UP', 'DOWN']) {
     }
   });
 }
-
