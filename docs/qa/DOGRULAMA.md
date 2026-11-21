@@ -42,4 +42,13 @@ node tests/k6/unit/runtime-check.mjs <k6-exe-yolu>
 
 ## İlk gerçek koşu
 
-Berkay hazır REST sürümünü, Doruk erişilebilir ortam adresini bildirdikten sonra `tests/k6/README.md` içindeki REST smoke komutu çalıştırılır. Çıkan bulgular kaydedilir; hatalar giderilmeden karşılaştırmalı performans sonucuna geçilmez. Ortam salıdan sonra hazırlanacağından 4 Kasım için canlı demo taahhüdü yoktur.
+Berkay hazır REST sürümünü, Doruk erişilebilir ortam adresini bildirdikten sonra `tests/k6/README.md` içindeki REST smoke komutu çalıştırılır. Çıkan bulgular kaydedilir; hatalar giderilmeden karşılaştırmalı performans sonucuna geçilmez. Güncel ortam teslim günü ekip görüşmesinde kesinleştirilecektir.
+
+
+## 21 Kasım ön kontrol düzeltmesi
+
+GraphQL ön kontrolü yalnız id seçerken tam S1 doğrulaması yaptığı için geçerli cevapları reddediyordu. Sorgu artık preflight.mjs --graphql-body üzerinden ortak queries.S1 kullanır. Yeni preflight-runner.test.mjs gerçek Windows PowerShell 5.1 çalıştırıcısını loopback sunucusuyla sınar; UP durumunda tam sorgu geçer, DOWN durumunda API/k6 aşamasına geçilmez. k6 yerine bilinçli duran bir test komutu kullanılır; bu test performans üretmez.
+
+Öneri ve toplantı dosyaları, ekip onayı veya gerçek benchmark sonucu sayılmaz.
+
+21 Kasım doğrulaması: 14/14 Node testi geçti (12 birim kontrolü + 2 Windows wrapper regresyonu). PowerShell sözdizimi ve git diff --check temiz. Gerçek backend veya k6 benchmark çalıştırılmadı.

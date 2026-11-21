@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { decode, validate, validateContentType, patientId } from './lib/contract.mjs';
+import { decode, validate, validateContentType, patientId, queries } from './lib/contract.mjs';
 
 export function validateProbe(protocol, status, contentType, body) {
   const headers = { 'Content-Type': contentType || '' };
@@ -15,6 +15,10 @@ export function validateProbe(protocol, status, contentType, body) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  if (process.argv[2] === '--graphql-body') {
+    console.log(JSON.stringify({ query: queries.S1, operationName: 'S1', variables: { id: patientId('S1') } }));
+    process.exit(0);
+  }
   const [, , protocol, status, contentType, bodyPath] = process.argv;
   if (!['rest', 'graphql'].includes(protocol) || !status || !bodyPath) {
     throw new Error('usage: preflight.mjs <rest|graphql> <status> <content-type> <body-file>');

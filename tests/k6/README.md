@@ -94,3 +94,12 @@ Tek protokol bir seferde çalıştırılır. Ana hedef doğrudan LabResultServic
 gRPC istemcisi: PR6 şeması RFC/ortak API ile uyumlu olunca; VU başına bağlantı ve normalize edilmiş cevaplar eklenecek. Şimdilik `PROTOCOL=grpc` açık hata verir. İzleme açık/kapalı %3 deneyi, DB kesintisi ve istemci iptali, UI düğmesi ve runner API bu pakette uygulanmış sayılmaz. Doruk'un ortamı geldiğinde birlikte tamamlanır.
 
 Resmî k6 başvuruları: [lifecycle](https://grafana.com/docs/k6/latest/using-k6/test-lifecycle/), [thresholds](https://grafana.com/docs/k6/latest/using-k6/thresholds/), [custom summary](https://grafana.com/docs/k6/latest/results-output/end-of-test/custom-summary/).
+
+
+## Güncel çalışma planı
+
+- [Deney planı](../../docs/qa/DENEY-PLANI.md): talimattaki sabitler, ekipçe kesinleşecek öneriler ve gerçek koşu kapıları.
+- [Ekip görüşmesi ve kod inceleme](../../docs/qa/GORUSME-VE-KOD-INCELEME.md): sahipler, teslim soruları ve gösterilecek kod.
+- [Final raporu test bölümü](../../docs/qa/RAPOR-TEST-BOLUMU.md): yöntem taslağı ve boş sonuç tabloları.
+
+Tüm Node kontrolleri: `npm test --prefix tests/k6`. Windows'ta iki ek kontrol gerçek PowerShell wrapper'ını yalnız loopback stand-in ile çalıştırır. Windows dışındaki ortamlarda bu iki kontrol atlanır ve ayrıca Windows'ta doğrulama gerekir.

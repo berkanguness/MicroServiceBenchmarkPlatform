@@ -51,13 +51,14 @@ if ($official) {
   Save-Json (Join-Path $out 'environment.json') $environment
 
   try {
-    $ready = Invoke-WebRequest "$($ManagementUrl.TrimEnd('/'))/actuator/health/readiness" -TimeoutSec 10
+    $ready = Invoke-WebRequest -UseBasicParsing "$($ManagementUrl.TrimEnd('/'))/actuator/health/readiness" -TimeoutSec 10
+    if (($ready.Content | ConvertFrom-Json).status -ne 'UP') { throw 'Readiness durumu UP değil.' }
     if ($ready.StatusCode -lt 200 -or $ready.StatusCode -ge 300) { throw "Readiness status=$($ready.StatusCode)" }
   } catch { throw "Readiness ön kontrolü başarısız: $($_.Exception.Message)" }
 
   try {
     if ($Protocol -eq 'rest') {
-      $probe = Invoke-WebRequest "$($BaseUrl.TrimEnd('/'))/api/v1/patients/3/summary" -TimeoutSec 10
+      $probe = Invoke-WebRequest -UseBasicParsing "$($BaseUrl.TrimEnd('/'))/api/v1/patients/3/summary" -TimeoutSec 10
       $probeContentType = [string]$probe.Headers['Content-Type']
       if ($probe.StatusCode -ne 200 -or $probeContentType -notmatch 'application/json') { throw "REST ön kontrolü status=$($probe.StatusCode) content-type=$probeContentType" }
       $probeBodyPath = Join-Path $out 'preflight-rest-body.json'
@@ -65,8 +66,9 @@ if ($official) {
       & node (Join-Path $PSScriptRoot 'preflight.mjs') rest ([string]$probe.StatusCode) $probeContentType $probeBodyPath
       if ($LASTEXITCODE -ne 0) { throw 'REST ön kontrol sözleşme doğrulaması başarısız.' }
     } elseif ($Protocol -eq 'graphql') {
-      $body = '{"query":"query QAPreflight($id: ID!) { patientSummary(patientId: $id) { patient { id } } }","operationName":"QAPreflight","variables":{"id":"3"}}'
-      $probe = Invoke-WebRequest "$($BaseUrl.TrimEnd('/'))/graphql" -Method Post -ContentType 'application/json' -Headers @{ Accept='application/json' } -Body $body -TimeoutSec 10
+      $body = & node (Join-Path $PSScriptRoot 'preflight.mjs') --graphql-body
+      if ($LASTEXITCODE -ne 0) { throw 'GraphQL ön kontrol sorgusu üretilemedi.' }
+      $probe = Invoke-WebRequest -UseBasicParsing "$($BaseUrl.TrimEnd('/'))/graphql" -Method Post -ContentType 'application/json' -Headers @{ Accept='application/json' } -Body $body -TimeoutSec 10
       $probeContentType = [string]$probe.Headers['Content-Type']
       if ($probe.StatusCode -ne 200 -or $probeContentType -notmatch 'application/json|application/graphql-response\+json') { throw "GraphQL ön kontrolü status=$($probe.StatusCode) content-type=$probeContentType" }
       $probeBodyPath = Join-Path $out 'preflight-graphql-body.json'

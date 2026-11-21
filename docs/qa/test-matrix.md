@@ -34,3 +34,13 @@ Tüm durumlar başlangıçta **çalıştırılmadı**. Hatalı istek kontrolleri
 
 HTTP hazırlığı: QA-02..09 ve QA-13 smoke koduyla kapsanır; QA-10..14 yük profilleri hazırlanmıştır. Gerçek backend durumlarının tamamı çalıştırılmadı. QA-01 kısmi metadata kaydı; QA-15..19 bekliyor. gRPC bütün maddelerde bekliyor.
 Sınır ve format kontrolleri QA-20..24 sentetik birim testleriyle kapsanır; bunlar backend veya benchmark kanıtı değildir.
+
+
+## 21 Kasım sözleşme kontrolü
+
+- Main: ortak API/veritabanı var; gerçek adaptör doğrulaması yok. #15 seed hastaları (3/1/2/1001) mevcut test matrisiyle uyumlu.
+- #16 Java paket düzeni HTTP cevap alanlarını değiştirmiyor. #17 ortak sorgu, hata sınıflandırması ve DB read-inactivity davranışı getiriyor; toplam istemci timeout'u ekipçe belirlenmeli.
+- #6 proto hâlâ GetPatientSummary ve nested hasta/rapor yapısına uyum bekliyor. gRPC hazırlanmış sayılmaz.
+- #36 GraphQL ön kontrolü ortak queries.S1 kullanacak şekilde düzeltildi. Readiness HTTP 2xx yanında JSON status=UP ister. Windows PowerShell 5.1 için UseBasicParsing kullanılır.
+- #37 frontend yeni yüklendi; eksik hastakayıt import hedefi ve İG-5 kapsamı görüşmede teyit edilecek. QA-18/19 çalıştırılmadı.
+- Güncel yöntem önerileri DENEY-PLANI.md; bağımlılık ve görüşme soruları GORUSME-VE-KOD-INCELEME.md içinde. Gerçek test durumları değişmedi.
