@@ -41,17 +41,29 @@ import org.springframework.stereotype.Component;
  *       effective pool settings, gRPC properties and JVM facts. {@code grpc.executorThreads} reports the spring-grpc
  *       default until Backend B's {@code GrpcServerExecutorProvider} exists (§12 Q3).</li>
  * </ul>
- * JVM input arguments are reported with the value of any {@code -D…password/secret/token/credential…=} redacted.
+ * JVM input arguments go through an allowlist ({@link #allowedInputArguments}): only heap/stack sizes and {@code -XX:}
+ * flags whose value is a boolean switch or a plain number survive; everything else ({@code -D…}, {@code -javaagent:},
+ * {@code -agentlib:}, {@code --add-opens}, {@code -XX:} options with a path or text value, ...) is left out, and only
+ * how many were left out is reported ({@code inputArgumentsOmitted}). QA saves this response next to every run, so
+ * nothing that may carry a path, a URL or a secret is echoed.
  */
 @Component
 public class LabInfoContributor implements InfoContributor {
 
     /** §11.2 / §12 Q3: what {@code lab.runtime.grpc.executorThreads} says until B's executor provider exists. */
     static final String GRPC_DEFAULT_EXECUTOR = "default (unbounded cached pool)";
-    static final String REDACTED = "******";
 
-    private static final Pattern SECRET_SYSTEM_PROPERTY =
-            Pattern.compile("(?i)^(-D[^=]*(password|secret|token|credential)[^=]*=).*$");
+    /**
+     * The JVM arguments {@code lab.runtime.jvm.inputArguments} reports: {@code -Xmx/-Xms/-Xss} with a size,
+     * {@code -XX:+Name}/{@code -XX:-Name}, and {@code -XX:Name=} with a number (optional size unit or fraction, e.g.
+     * {@code -XX:MaxRAMPercentage=75.0}, {@code -XX:ActiveProcessorCount=2}). An {@code -XX:} option with any other
+     * value ({@code HeapDumpPath}, {@code ErrorFile}, {@code OnOutOfMemoryError}, {@code StartFlightRecording}, ...) can
+     * hold a path or a command and is omitted.
+     */
+    private static final Pattern ALLOWED_INPUT_ARGUMENT = Pattern.compile(
+            "^(?:-X(?:mx|ms|ss)[0-9]+[kKmMgGtT]?"
+                    + "|-XX:[+-][A-Za-z][A-Za-z0-9_]*"
+                    + "|-XX:[A-Za-z][A-Za-z0-9_]*=[0-9]+(?:\\.[0-9]+)?[kKmMgGtT]?)$");
 
     private static final String DATASET_QUERY = "select name, generator_version, seed, patient_count, report_count,"
             + " item_count, checksum_sha256, seeded_at from dataset_meta where name = ?";
@@ -193,8 +205,10 @@ public class LabInfoContributor implements InfoContributor {
 
     private static Map<String, Object> jvm() {
         Map<String, Object> j = new LinkedHashMap<>();
-        j.put("inputArguments", ManagementFactory.getRuntimeMXBean().getInputArguments().stream()
-                .map(LabInfoContributor::redact).toList());
+        List<String> arguments = ManagementFactory.getRuntimeMXBean().getInputArguments();
+        List<String> allowed = allowedInputArguments(arguments);
+        j.put("inputArguments", allowed);
+        j.put("inputArgumentsOmitted", arguments.size() - allowed.size());
         j.put("gcNames", ManagementFactory.getGarbageCollectorMXBeans().stream()
                 .map(GarbageCollectorMXBean::getName).toList());
         j.put("availableProcessors", Runtime.getRuntime().availableProcessors());
@@ -202,7 +216,8 @@ public class LabInfoContributor implements InfoContributor {
         return j;
     }
 
-    static String redact(String argument) {
-        return SECRET_SYSTEM_PROPERTY.matcher(argument).replaceFirst("$1" + REDACTED);
+    /** The allowlisted arguments of {@code arguments}, in their original order; everything else is dropped. */
+    static List<String> allowedInputArguments(List<String> arguments) {
+        return arguments.stream().filter(a -> ALLOWED_INPUT_ARGUMENT.matcher(a).matches()).toList();
     }
 }

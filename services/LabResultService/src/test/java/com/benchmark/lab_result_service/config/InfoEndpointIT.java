@@ -45,7 +45,7 @@ class InfoEndpointIT extends AbstractPostgresIT {
             "lab.runtime.hikari.maximumPoolSize", "lab.runtime.hikari.minimumIdle",
             "lab.runtime.hikari.connectionTimeoutMs", "lab.runtime.hikari.autoCommit",
             "lab.runtime.grpc.port", "lab.runtime.grpc.reflectionEnabled", "lab.runtime.grpc.executorThreads",
-            "lab.runtime.jvm.inputArguments", "lab.runtime.jvm.gcNames", "lab.runtime.jvm.availableProcessors",
+            "lab.runtime.jvm.inputArguments", "lab.runtime.jvm.inputArgumentsOmitted", "lab.runtime.jvm.gcNames", "lab.runtime.jvm.availableProcessors",
             "lab.runtime.jvm.maxHeapBytes");
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -62,7 +62,8 @@ class InfoEndpointIT extends AbstractPostgresIT {
                 missing.add(key);
             }
         }
-        assertThat(missing).as("§11.2 keys missing or null in %s", info).isEmpty();
+        // only the missing paths: the response itself (JVM arguments, hosts) is not copied into test output
+        assertThat(missing).as("§11.2 keys missing or null").isEmpty();
     }
 
     @Test
@@ -102,6 +103,10 @@ class InfoEndpointIT extends AbstractPostgresIT {
         assertThat(r.path("jvm").path("maxHeapBytes").asLong()).isPositive();
         assertThat(r.path("jvm").path("gcNames").isArray()).isTrue();
         assertThat(r.path("jvm").path("inputArguments").isArray()).isTrue();
+        assertThat(r.path("jvm").path("inputArguments").valueStream().map(JsonNode::asString)
+                .filter(a -> !a.startsWith("-X")).toList()).as("only -X…/-XX:… arguments are reported").isEmpty();
+        assertThat(r.path("jvm").path("inputArgumentsOmitted").isInt()).isTrue();
+        assertThat(r.path("jvm").path("inputArgumentsOmitted").asInt()).isNotNegative();
     }
 
     private JsonNode fetch() throws Exception {

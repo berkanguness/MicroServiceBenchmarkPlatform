@@ -6,6 +6,7 @@ import com.benchmark.lab_result_service.testsupport.AbstractPostgresIT;
 import com.benchmark.lab_result_service.testsupport.GraphQlDocuments;
 import com.benchmark.lab_result_service.testsupport.HttpProbe;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -14,12 +15,14 @@ import org.apache.coyote.http11.AbstractHttp11Protocol;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalManagementPort;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.tomcat.TomcatWebServer;
 import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ApplicationContext;
+import org.springframework.core.env.Environment;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
 import tools.jackson.databind.JsonNode;
@@ -28,9 +31,10 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * Contract §10 P6 {@code ObservabilityBenchIT}, profile {@code bench} (over {@code test}, P1 fixture, no dataset
  * manifest): every §11.1 meter is scraped from {@code /actuator/prometheus} on the <em>management</em> port with the
- * common tag {@code application="lab-result-service"}; Tomcat really runs with {@code maxKeepAliveRequests = -1} and a
- * 60 s keep-alive timeout (R1); the server port serves no {@code /actuator/**}; readiness answers on the management
- * port; {@code /actuator/info} does not fail without a {@code dataset_meta} row.
+ * common tag {@code application="lab-result-service"}; the API connector really runs with
+ * {@code maxKeepAliveRequests = -1} and the bench profile binds {@code server.tomcat.keep-alive-timeout = 60s} (R1; see
+ * {@link #tomcatRunsWithTheBenchKeepAliveSettings}); the server port serves no {@code /actuator/**}; readiness answers
+ * on the management port; {@code /actuator/info} does not fail without a {@code dataset_meta} row.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("bench")                                   // after the inherited "test": bench wins where both set a key
@@ -49,6 +53,7 @@ class ObservabilityBenchIT extends AbstractPostgresIT {
     @LocalServerPort int port;
     @LocalManagementPort int managementPort;
     @Autowired ApplicationContext context;
+    @Autowired Environment environment;
 
     private final HttpProbe http = new HttpProbe();
 
@@ -84,14 +89,23 @@ class ObservabilityBenchIT extends AbstractPostgresIT {
                 .forEach(line -> assertThat(line).contains(APPLICATION_TAG));
     }
 
+    /**
+     * R1 keep-alive. {@code maxKeepAliveRequests = -1} differs from Tomcat's default (100), so the connector check alone
+     * proves it. The connector's 60000 ms keep-alive timeout does <em>not</em>: Tomcat 11 falls back to its connection
+     * timeout, whose default is also 60 s. So the test also requires {@code server.tomcat.keep-alive-timeout} to be bound
+     * to 60 s in the environment (what Boot's Tomcat customizer applies); without the bench key it is unbound and this
+     * fails.
+     */
     @Test
     void tomcatRunsWithTheBenchKeepAliveSettings() {
+        assertThat(Binder.get(environment).bind("server.tomcat.keep-alive-timeout", Duration.class).orElse(null))
+                .as("server.tomcat.keep-alive-timeout bound by the bench profile").isEqualTo(Duration.ofSeconds(60));
         TomcatWebServer server = (TomcatWebServer) ((WebServerApplicationContext) context).getWebServer();
         ProtocolHandler handler = server.getTomcat().getConnector().getProtocolHandler();
         assertThat(handler).isInstanceOf(AbstractHttp11Protocol.class);
         AbstractHttp11Protocol<?> http11 = (AbstractHttp11Protocol<?>) handler;
         assertThat(http11.getMaxKeepAliveRequests()).isEqualTo(-1);
-        assertThat(http11.getKeepAliveTimeout()).isEqualTo(60_000);
+        assertThat(http11.getKeepAliveTimeout()).as("effective; equals Tomcat 11's default").isEqualTo(60_000);
         assertThat(server.getPort()).isEqualTo(port).isNotEqualTo(managementPort);
     }
 
