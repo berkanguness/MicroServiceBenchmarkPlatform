@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decode, validate, expectedError, canonical, utf8Bytes } from '../lib/contract.mjs';
+import { decode, validate, expectedError, canonical, utf8Bytes, validateContentType } from '../lib/contract.mjs';
 import { config } from '../lib/config.mjs';
 import { fixture } from './fixture.mjs';
+import { validateProbe } from '../preflight.mjs';
 
 test('valid S1/S2, empty patient and separate S2b are accepted', () => {
   assert.ok(validate(fixture('S1'), 'S1'));
@@ -23,6 +24,32 @@ test('HTTP 200 with GraphQL errors, null root or malformed JSON is failure', () 
   }
   assert.equal(decode('rest', 503, '{}', 'S1').ok, false);
 });
+test('timeout, connection, redirects and non-200 2xx/3xx responses are anomalous', () => {
+  for (const status of [0, 201, 204, 206, 301, 302, 307]) {
+    assert.equal(decode('rest', status, '{}', 'S1').ok, false);
+  }
+  assert.equal(decode('rest', 0, '', 'S1').reason, 'timeout_or_connection_failure');
+  assert.equal(validateContentType({ 'Content-Type': 'text/html' }, 'rest'), false);
+  assert.equal(validateContentType({ 'content-type': 'application/json; charset=utf-8' }, 'rest'), true);
+  assert.equal(validateContentType({ 'Content-Type': 'application/graphql-response+json' }, 'graphql'), true);
+});
+test('preflight rejects malformed REST JSON, GraphQL errors, null roots and invalid contract shapes', () => {
+  const restValid = JSON.stringify(fixture('S1'));
+  assert.equal(validateProbe('rest', 200, 'application/json', restValid).ok, true);
+  assert.equal(validateProbe('graphql', 200, 'application/graphql-response+json',
+    JSON.stringify({ data: { patientSummary: fixture('S1') } })).ok, true);
+  assert.equal(validateProbe('rest', 200, 'application/json', '<html>').ok, false);
+  assert.equal(validateProbe('rest', 200, 'text/html', restValid).ok, false);
+  assert.equal(validateProbe('graphql', 200, 'application/json', JSON.stringify({
+    data: { patientSummary: fixture('S1') }, errors: [{ message: 'injected' }]
+  })).ok, false);
+  assert.equal(validateProbe('graphql', 200, 'application/json', JSON.stringify({
+    data: { patientSummary: null }
+  })).ok, false);
+  assert.equal(validateProbe('graphql', 200, 'application/json', JSON.stringify({
+    data: { patientSummary: { patient: { id: 3 } } }
+  })).ok, false);
+});
 test('expected negative tests require correct status, root and error code', () => {
   assert.ok(expectedError('rest', 404, '{"status":404,"code":"PATIENT_NOT_FOUND"}', 'S1', 'PATIENT_NOT_FOUND', 404));
   const body = JSON.stringify({ data: { patientSummary: null }, errors: [{ extensions: { code: 'INVALID_ARGUMENT' } }] });
@@ -42,8 +69,16 @@ test('measurement cannot silently invent metadata or warmup; gRPC and invalid S2
   assert.throws(() => config({ PROTOCOL: 'grpc', WARMUP_SECONDS: '10' }));
   assert.throws(() => config({ WORKLOAD: 'S2b', PROTOCOL: 'rest', WARMUP_SECONDS: '10' }));
 });
+test('direct k6 permits safe shakedown without evidence but rejects official evidence omission', () => {
+  assert.doesNotThrow(() => config({ PROFILE: 'shakedown', WARMUP_SECONDS: '5', DURATION_SECONDS: '10' }));
+  assert.throws(() => config({
+    PROFILE: 'low', WARMUP_SECONDS: '5', DURATION_SECONDS: '10',
+    RUN_ID: 'test', GIT_SHA: 'a'.repeat(40), DATASET_CHECKSUM: 'b'.repeat(64),
+    READY_FOR_MEASUREMENT: 'yes'
+  }));
+});
 test('S1 fixes 200 VU / 120 sec; spike duration validated', () => {
-  const env = { PROFILE: 's1-200', WARMUP_SECONDS: '10', RUN_ID: 'test', GIT_SHA: 'abc', DATASET_CHECKSUM: 'x', READY_FOR_MEASUREMENT: 'yes' };
+  const env = { PROFILE: 's1-200', WARMUP_SECONDS: '10', RUN_ID: 'test', GIT_SHA: 'a'.repeat(40), DATASET_CHECKSUM: 'b'.repeat(64), READY_FOR_MEASUREMENT: 'yes', EVIDENCE: 'backend' };
   const c = config(env); assert.equal(c.vus, 200); assert.equal(c.seconds, 120);
   assert.throws(() => config({ ...env, PROFILE: 'spike', DURATION_SECONDS: '10', SPIKE_STAGES: '[{"seconds":5,"target":500}]' }));
 });

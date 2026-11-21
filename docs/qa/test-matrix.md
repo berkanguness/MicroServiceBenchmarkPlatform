@@ -25,6 +25,22 @@ Tüm durumlar başlangıçta **çalıştırılmadı**. Hatalı istek kontrolleri
 | QA-17 | İzleme açık/kapalı | En az 5 rastgele sıralı çift; kapsam ve belirsizlik raporu | P6 + Doruk ile ortam |
 | QA-18 | UI protokol değiştirme | Gösterilen veri ve ms/KB'nin ölçüm sınırı doğru | BFF + frontend |
 | QA-19 | UI test başlatma/sonuç | Koşu kimliği, durum, seçilen senaryo, doğru sonuç | Runner API + frontend |
+| QA-20 | Zaman aşımı/bağlantı hatası | HTTP status 0 timeout_or_connection_failure olarak işaretlenir | K6 birim: contract.test |
+| QA-21 | GraphQL eksik data kökü | errors veya null root başarısız işlem; missing data sessiz geçmez | K6 birim: contract.test |
+| QA-22 | HTTP 2xx/3xx anomalisi | 200 dışı tüm 2xx/3xx cevapları başarısız/anormal sayılır | K6 birim: contract.test |
+| QA-23 | Yanlış content-type | application/json veya application/graphql-response+json dışında cevap başarısız sayılır | K6 birim: contract.test |
+| QA-24 | Hatalı özet/metadata | Şema, mock, smoke, incomplete/failed durum ve bozuk metrikler CSV'ye girmez | K6 birim: export.test |
 
 
 HTTP hazırlığı: QA-02..09 ve QA-13 smoke koduyla kapsanır; QA-10..14 yük profilleri hazırlanmıştır. Gerçek backend durumlarının tamamı çalıştırılmadı. QA-01 kısmi metadata kaydı; QA-15..19 bekliyor. gRPC bütün maddelerde bekliyor.
+Sınır ve format kontrolleri QA-20..24 sentetik birim testleriyle kapsanır; bunlar backend veya benchmark kanıtı değildir.
+
+
+## 21 Kasım sözleşme kontrolü
+
+- Main: ortak API/veritabanı var; gerçek adaptör doğrulaması yok. #15 seed hastaları (3/1/2/1001) mevcut test matrisiyle uyumlu.
+- #16 Java paket düzeni HTTP cevap alanlarını değiştirmiyor. #17 ortak sorgu, hata sınıflandırması ve DB read-inactivity davranışı getiriyor; toplam istemci timeout'u ekipçe belirlenmeli.
+- #6 proto hâlâ GetPatientSummary ve nested hasta/rapor yapısına uyum bekliyor. gRPC hazırlanmış sayılmaz.
+- #36 GraphQL ön kontrolü ortak queries.S1 kullanacak şekilde düzeltildi. Readiness HTTP 2xx yanında JSON status=UP ister. Windows PowerShell 5.1 için UseBasicParsing kullanılır.
+- #37 frontend yeni yüklendi; eksik hastakayıt import hedefi ve İG-5 kapsamı görüşmede teyit edilecek. QA-18/19 çalıştırılmadı.
+- Güncel yöntem önerileri DENEY-PLANI.md; bağımlılık ve görüşme soruları GORUSME-VE-KOD-INCELEME.md içinde. Gerçek test durumları değişmedi.

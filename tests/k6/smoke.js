@@ -1,6 +1,6 @@
 import { check } from 'k6';
 import { request } from './lib/client.mjs';
-import { decode, validate, expectedError, canonical } from './lib/contract.mjs';
+import { decode, validate, expectedError, canonical, validateContentType } from './lib/contract.mjs';
 
 const base = (__ENV.BASE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
 const mode = __ENV.PROTOCOL || 'rest';
@@ -15,7 +15,7 @@ export default function () {
     for (const [scenario, id] of [['S1', '3'], ['S2', '1'], ['S1', '2'], ['S2', '2']]) {
       const res = request(protocol, scenario, id, base);
       const data = decode(protocol, res.status, res.body, scenario);
-      const valid = data.ok && validate(data.value, scenario, id);
+      const valid = data.ok && validateContentType(res.headers, protocol) && validate(data.value, scenario, id);
       check(valid, { [`${protocol} ${scenario} patient=${id} shape/count/order`]: v => v });
       if (valid) responses[protocol][`${scenario}-${id}`] = data.value;
     }
@@ -28,7 +28,7 @@ export default function () {
     if (protocol === 'graphql') {
       const res = request(protocol, 'S2b', '1', base);
       const data = decode(protocol, res.status, res.body, 'S2b');
-      const valid = data.ok && validate(data.value, 'S2b');
+      const valid = data.ok && validateContentType(res.headers, 'graphql') && validate(data.value, 'S2b');
       check(valid, { 'GraphQL S2b 1000 selected items': v => v });
       const full = responses.graphql['S2-1'];
       const projection = full?.reports.map(r => ({ items: r.items.map(i => ({ testName: i.testName, resultValue: i.resultValue })) }));
