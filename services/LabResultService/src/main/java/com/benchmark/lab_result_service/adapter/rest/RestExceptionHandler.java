@@ -19,7 +19,6 @@ import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
-import org.springframework.web.util.DisconnectedClientHelper;
 
 /**
  * RFC 9457 errors of the REST adapter (contract §7.1, §7.4), {@code application/problem+json} with the extra member
@@ -32,8 +31,9 @@ import org.springframework.web.util.DisconnectedClientHelper;
  *   <li>Spring's own web exceptions ({@link ErrorResponse}, e.g. an unsatisfiable {@code Accept}) are rethrown
  *       unrecorded, so Spring's default resolver keeps handling them; they are not service outcomes (§7.4 lists none).</li>
  *   <li>5xx {@code detail} is fixed text, never an exception message, SQL or stack trace.</li>
- *   <li>A client that disconnected ({@link ClientAbortException}, {@link AsyncRequestNotUsableException}) is recorded
- *       as {@code CLIENT_ABORTED}; nothing is written to the dead connection.</li>
+ *   <li>A client that disconnected is recorded as {@code CLIENT_ABORTED} and nothing is written to the dead
+ *       connection. Detection is by type only ({@link #isClientAbort}); an exception message such as "Broken pipe" is
+ *       never evidence of a disconnect.</li>
  * </ul>
  */
 @RestControllerAdvice(assignableTypes = PatientRestController.class)
@@ -77,7 +77,18 @@ public class RestExceptionHandler {
         return problem(HttpStatus.INTERNAL_SERVER_ERROR, INTERNAL_DETAIL, ErrorCode.INTERNAL, request);
     }
 
-    /** Tomcat's {@code ClientAbortException} / Spring's {@code AsyncRequestNotUsableException} anywhere in the cause chain. */
+    /**
+     * A client disconnect, decided by type only: one of these anywhere in the cause chain.
+     * <ul>
+     *   <li>{@link ClientAbortException}: Tomcat's connector buffers ({@code OutputBuffer}, {@code InputBuffer})
+     *       throw it for an I/O failure on the client connection, so it never stems from the database or other I/O.</li>
+     *   <li>{@link AsyncRequestNotUsableException}: Spring's response wrapper throws it once a write to the response
+     *       failed, i.e. the response can no longer be used.</li>
+     * </ul>
+     * Message phrases ("Broken pipe", "Connection reset by peer", Spring's {@code DisconnectedClientHelper}) are
+     * deliberately not used: an I/O failure of something else, while the client is still connected, must stay
+     * {@code INTERNAL} (500), never an empty 200.
+     */
     static boolean isClientAbort(Throwable e) {
         Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         for (Throwable t = e; t != null && seen.add(t); t = t.getCause()) {
@@ -85,7 +96,7 @@ public class RestExceptionHandler {
                 return true;
             }
         }
-        return DisconnectedClientHelper.isClientDisconnectedException(e);
+        return false;
     }
 
     private static ResponseEntity<ProblemDetail> problem(HttpStatus status, @Nullable String detail, ErrorCode code,

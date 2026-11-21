@@ -7,11 +7,13 @@ import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import com.benchmark.lab_result_service.core.api.enums.ErrorCode;
 import com.benchmark.lab_result_service.core.api.enums.Protocol;
 import com.benchmark.lab_result_service.core.api.service.LabErrorRecorder;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import org.apache.catalina.connector.ClientAbortException;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.converter.HttpMessageNotWritableException;
@@ -51,6 +53,21 @@ class RestExceptionHandlerTest {
 
         assertThatThrownBy(() -> handler.handleOther(e, request)).isSameAs(e);
         verifyNoInteractions(recorder);
+    }
+
+    /** Referee finding (codex #1): a "Broken pipe" message without a typed disconnect is not a client abort. */
+    @Test
+    void brokenPipeMessageWithoutATypedDisconnectIsInternal() throws Exception {
+        var e = new UncheckedIOException("server-side producer failed", new IOException("Broken pipe"));
+
+        assertThat(RestExceptionHandler.isClientAbort(e)).isFalse();
+        assertThat(RestExceptionHandler.isClientAbort(new IOException("Connection reset by peer"))).isFalse();
+        assertThat(RestExceptionHandler.isClientAbort(new java.io.EOFException())).isFalse();
+        var response = handler.handleOther(e, request);
+        assertThat(response).isNotNull();
+        assertThat(response.getStatusCode().value()).isEqualTo(500);
+        verify(recorder).record(Protocol.REST, ErrorCode.INTERNAL, e);
+        verifyNoMoreInteractions(recorder);
     }
 
     @Test

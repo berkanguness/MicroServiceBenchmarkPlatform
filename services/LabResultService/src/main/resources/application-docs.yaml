@@ -1,6 +1,0 @@
-# Profile "docs" (contract §8.1, R4): API documentation for humans. Never part of a benchmark run.
-springdoc:
-  api-docs:
-    enabled: true
-  swagger-ui:
-    enabled: true

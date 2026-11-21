@@ -24,6 +24,7 @@ import com.benchmark.lab_result_service.core.api.service.LabResultQueryService;
 import com.benchmark.lab_result_service.testsupport.GeneratedViews;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.sql.SQLTransientConnectionException;
@@ -207,6 +208,22 @@ class PatientRestControllerTest {
         verifyNoMoreInteractions(recorder);
     }
 
+    /**
+     * Referee finding (codex #1, REPRODUCED before the fix as "expected: 500 but was: 200", recorded CLIENT_ABORTED,
+     * empty body): an unrelated I/O failure whose message is "Broken pipe", while the client is still connected,
+     * is INTERNAL, recorded once, with a problem body.
+     */
+    @Test
+    void brokenPipeMessageWhileTheClientIsConnectedIs500NotAnEmpty200() throws Exception {
+        RuntimeException e = new UncheckedIOException("server-side producer failed", new IOException("Broken pipe"));
+        when(service.getPatientSummary(3)).thenThrow(e);
+
+        expectProblem(get("/api/v1/patients/3/summary"), 500, "Internal Server Error", "Internal error", "INTERNAL",
+                "/api/v1/patients/3/summary");
+        verify(recorder).record(Protocol.REST, ErrorCode.INTERNAL, e);
+        verifyNoMoreInteractions(recorder);
+    }
+
     @Test
     void anErrorWithANullMessageIsStill500() throws Exception {
         when(service.getPatientLabHistory(anyLong())).thenThrow(new NullPointerException());
@@ -229,7 +246,7 @@ class PatientRestControllerTest {
         verifyNoInteractions(recorder);
     }
 
-    /** springdoc puts a YAML converter on the classpath; the endpoints still only produce JSON. */
+    /** The endpoints only produce JSON ({@code produces=application/json}); YAML is never negotiated. */
     @Test
     void yamlIsNotNegotiable() throws Exception {
         mvc.perform(get("/api/v1/patients/3/summary").accept(MediaType.parseMediaType("application/yaml")))
