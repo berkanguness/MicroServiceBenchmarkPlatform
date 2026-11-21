@@ -44,8 +44,9 @@ docker compose down       # durdur (veri korunur)
 ## Sık karşılaşılan durumlar
 - **Şifreyi `.env`'de değiştirdim ama giriş çalışmıyor:** Grafana ve PostgreSQL şifreyi ilk açılışta volume'a yazar. Sıfırlamak için `docker compose down -v` (tüm verileri siler) ve tekrar `up -d`.
 - **Port zaten kullanımda hatası:** Aynı portu kullanan başka bir program var, onu kapat.
+- **CPU/Bellek panelleri "No data" gösteriyor:** cAdvisor, diğer konteynerlerle aynı anda başlayınca onları görmeyebilir. `docker compose restart cadvisor` yazıp bir dakika bekle.
 
 ## Bilinen sınırlamalar (Docker Desktop)
 - cAdvisor, Docker Desktop'ta konteyner bazlı metrik için `--containerd-namespace=moby` bayrağına ihtiyaç duyar (`docker-compose.yml`'de ekli).
-- Docker Desktop'ta ağ trafiği konteyner bazında değil, tüm Docker ortamı için görünür. Linux sunucuda konteyner bazında gelmesi beklenir.
+- Docker Desktop'ta ağ trafiği (gelen ve giden) konteyner bazında değil, tüm Docker ortamı için görünür. Linux sunucuda konteyner bazında gelmesi beklenir.
 - Konteyner isimleri yerine imaj adları (`image` etiketi) gösterilir.
