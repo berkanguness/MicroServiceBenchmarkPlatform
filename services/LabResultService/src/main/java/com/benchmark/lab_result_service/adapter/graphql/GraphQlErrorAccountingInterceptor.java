@@ -25,12 +25,17 @@ import reactor.core.publisher.Mono;
  *       (they never reach the resolver) → {@code INVALID_ARGUMENT}, no cause; likewise {@code IntrospectionDisabled},
  *       graphql-java's answer to an introspection query while introspection is off (default and bench profiles):
  *       a rejected client request, not a server fault;</li>
- *   <li>any other error in the response that carries no {@code extensions.code} of ours (none is expected) →
- *       {@code INTERNAL}, so a failed request can never go unrecorded;</li>
+ *   <li>any other error in the response that carries no {@code extensions.code} (none is expected) →
+ *       {@code INTERNAL}, so an error from an unexpected producer is still recorded;</li>
  *   <li>the execution itself failing (no response) → {@code INTERNAL}.</li>
  * </ul>
  * If there are several, the most severe wins: {@code INTERNAL > UNAVAILABLE > INVALID_ARGUMENT > PATIENT_NOT_FOUND}.
  * Logging is the recorder's (§3.4).
+ *
+ * <p>The guarantee holds for the current, closed set of error producers: graphql-java's request errors and
+ * {@link GraphQlExceptionResolver}. An error that carries a {@code code} extension is trusted as built by that
+ * resolver; neither its value nor a matching holder entry is checked. A new producer (for example a data fetcher
+ * returning {@code DataFetcherResult} errors with its own {@code code}) must be accounted for explicitly first.
  */
 @Component
 public class GraphQlErrorAccountingInterceptor implements WebGraphQlInterceptor {
