@@ -56,7 +56,11 @@ server:
       max: 200
 
 # P2 dataset seeding and verification (contract §6.6, §6.7, §8.1), bound by seed.DatasetProperties.
+# P4 CORS (contract §8.1 R3), read by config.CorsConfig: comma-separated origins, empty = CORS off. Ignored under the
+# bench/bench-nomon profiles (CorsConfig is @Profile("!bench & !bench-nomon")).
 app:
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:}
   seed:
     enabled: false
   dataset:

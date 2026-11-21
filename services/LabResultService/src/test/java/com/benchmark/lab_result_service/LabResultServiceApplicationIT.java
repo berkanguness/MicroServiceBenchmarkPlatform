@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.util.ClassUtils;
 
 /** The application context starts against Testcontainers PostgreSQL 17 (replaces the generated contextLoads test). */
 class LabResultServiceApplicationIT extends AbstractPostgresIT {
@@ -43,6 +44,23 @@ class LabResultServiceApplicationIT extends AbstractPostgresIT {
         // F3: Hikari does not clamp validationTimeout to connectionTimeout; the default 5000 would make a hung
         // database cost about 5 s per acquisition instead of the contract's 2000 ms
         assertThat(hikari.getValidationTimeout()).isEqualTo(1_000).isLessThan(hikari.getConnectionTimeout());
+    }
+
+    /**
+     * P4 fix round: springdoc was dropped (R4 is covered by the Postman collection), and with it Jackson 2
+     * ({@code com.fasterxml.jackson.core:jackson-databind}, {@code jackson-dataformat-yaml}). JSON is written by
+     * Boot 4's one Jackson 3 converter (the golden files pin its output); no Jackson 2 JSON or YAML converter is
+     * registered, and no springdoc class is on the classpath.
+     */
+    @Test
+    void jsonIsWrittenByTheJackson3ConverterOnly() {
+        var adapter = context.getBean(org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.class);
+        var names = adapter.getMessageConverters().stream().map(c -> c.getClass().getName()).toList();
+        assertThat(names).contains("org.springframework.http.converter.json.JacksonJsonHttpMessageConverter")
+                .noneMatch(name -> name.contains("Jackson2"))
+                .noneMatch(name -> name.startsWith("org.springframework.http.converter.yaml."));
+        assertThat(ClassUtils.isPresent("com.fasterxml.jackson.databind.ObjectMapper", null)).as("Jackson 2 databind").isFalse();
+        assertThat(ClassUtils.isPresent("org.springdoc.core.configuration.SpringDocConfiguration", null)).as("springdoc").isFalse();
     }
 
     @Test

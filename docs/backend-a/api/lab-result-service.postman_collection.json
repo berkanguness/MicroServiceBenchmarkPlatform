@@ -1,0 +1,507 @@
+{
+  "info": {
+    "_postman_id": "6b1f4c2e-4f3a-4b8e-9c55-0d4912026a04",
+    "name": "LabResultService REST (YM491)",
+    "description": "REST adapter of LabResultService (contract docs/backend-a/implementation-contract.md §7.1/§7.4). Port 8080. Dataset: P2 seeder (profile seed). S1 = patient 3 summary, S2 = patient 1 lab-history.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "S1 — patient 3 summary (Scenario 1)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('Content-Type application/json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json/));",
+              "pm.test('no ETag / no compression', () => { pm.expect(pm.response.headers.has('ETag')).to.be.false; pm.expect(pm.response.headers.has('Content-Encoding')).to.be.false; });",
+              "const p = pm.response.json().patient ?? pm.response.json();",
+              "pm.test('patient.id = 3 (number)', () => { pm.expect(p.id).to.be.a('number'); pm.expect(p.id).to.eql(3); });",
+              "pm.test('patient fields', () => { pm.expect(p.tcNo).to.match(/^\\d{11}$/); pm.expect(p.fullName).to.be.a('string'); pm.expect(p.birthDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/); pm.expect(p.bloodType).to.be.oneOf(['A+','A-','B+','B-','AB+','AB-','O+','O-']); });",
+              "pm.test('exact patient field names', () => pm.expect(Object.keys(p)).to.eql(['id','tcNo','fullName','birthDate','bloodType']));",
+              "const checkReport = (r) => {",
+              "  pm.expect(Object.keys(r)).to.eql(['id','doctorName','sampleType','createdAt','items']);",
+              "  pm.expect(r.id).to.be.a('number');",
+              "  pm.expect(r.createdAt).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/);",
+              "  pm.expect(r.items).to.have.lengthOf(10);",
+              "  let last = 0;",
+              "  r.items.forEach(i => {",
+              "    pm.expect(Object.keys(i)).to.eql(['id','testCode','testName','resultValue','unit','isCritical']);",
+              "    pm.expect(i.id).to.be.a('number').and.above(last); last = i.id;",
+              "    pm.expect(i.resultValue).to.be.a('number');",
+              "    pm.expect(i.isCritical).to.be.a('boolean');",
+              "  });",
+              "};",
+              "const lr = pm.response.json().latestReport;",
+              "pm.test('latestReport = report 101 with items 1001..1010', () => { checkReport(lr); pm.expect(lr.id).to.eql(101); pm.expect(lr.items.map(i => i.id)).to.eql([1001,1002,1003,1004,1005,1006,1007,1008,1009,1010]); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/patients/3/summary",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "patients",
+            "3",
+            "summary"
+          ]
+        },
+        "description": "Scenario 1 (k6 S1): patient + latest report (createdAt DESC, id DESC) with its items (id ASC)."
+      }
+    },
+    {
+      "name": "S2 — patient 1 lab-history (Scenario 2)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('Content-Type application/json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json/));",
+              "pm.test('no ETag / no compression', () => { pm.expect(pm.response.headers.has('ETag')).to.be.false; pm.expect(pm.response.headers.has('Content-Encoding')).to.be.false; });",
+              "const p = pm.response.json().patient ?? pm.response.json();",
+              "pm.test('patient.id = 1 (number)', () => { pm.expect(p.id).to.be.a('number'); pm.expect(p.id).to.eql(1); });",
+              "pm.test('patient fields', () => { pm.expect(p.tcNo).to.match(/^\\d{11}$/); pm.expect(p.fullName).to.be.a('string'); pm.expect(p.birthDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/); pm.expect(p.bloodType).to.be.oneOf(['A+','A-','B+','B-','AB+','AB-','O+','O-']); });",
+              "pm.test('exact patient field names', () => pm.expect(Object.keys(p)).to.eql(['id','tcNo','fullName','birthDate','bloodType']));",
+              "const checkReport = (r) => {",
+              "  pm.expect(Object.keys(r)).to.eql(['id','doctorName','sampleType','createdAt','items']);",
+              "  pm.expect(r.id).to.be.a('number');",
+              "  pm.expect(r.createdAt).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/);",
+              "  pm.expect(r.items).to.have.lengthOf(10);",
+              "  let last = 0;",
+              "  r.items.forEach(i => {",
+              "    pm.expect(Object.keys(i)).to.eql(['id','testCode','testName','resultValue','unit','isCritical']);",
+              "    pm.expect(i.id).to.be.a('number').and.above(last); last = i.id;",
+              "    pm.expect(i.resultValue).to.be.a('number');",
+              "    pm.expect(i.isCritical).to.be.a('boolean');",
+              "  });",
+              "};",
+              "const rs = pm.response.json().reports;",
+              "pm.test('100 reports x 10 items', () => { pm.expect(rs).to.have.lengthOf(100); rs.forEach(checkReport); });",
+              "pm.test('reports ordered createdAt DESC, id DESC', () => { for (let k = 1; k < rs.length; k++) { const a = Date.parse(rs[k-1].createdAt), b = Date.parse(rs[k].createdAt); pm.expect(a > b || (a === b && rs[k-1].id > rs[k].id)).to.be.true; } });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/patients/1/lab-history",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "patients",
+            "1",
+            "lab-history"
+          ]
+        },
+        "description": "Scenario 2 (k6 S2): patient + every report with its items, always the full aggregate."
+      }
+    },
+    {
+      "name": "Patient 1",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('Content-Type application/json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json/));",
+              "pm.test('no ETag / no compression', () => { pm.expect(pm.response.headers.has('ETag')).to.be.false; pm.expect(pm.response.headers.has('Content-Encoding')).to.be.false; });",
+              "const p = pm.response.json().patient ?? pm.response.json();",
+              "pm.test('patient.id = 1 (number)', () => { pm.expect(p.id).to.be.a('number'); pm.expect(p.id).to.eql(1); });",
+              "pm.test('patient fields', () => { pm.expect(p.tcNo).to.match(/^\\d{11}$/); pm.expect(p.fullName).to.be.a('string'); pm.expect(p.birthDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/); pm.expect(p.bloodType).to.be.oneOf(['A+','A-','B+','B-','AB+','AB-','O+','O-']); });",
+              "pm.test('exact patient field names', () => pm.expect(Object.keys(p)).to.eql(['id','tcNo','fullName','birthDate','bloodType']));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/patients/1",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "patients",
+            "1"
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "Patient 2",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('Content-Type application/json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json/));",
+              "pm.test('no ETag / no compression', () => { pm.expect(pm.response.headers.has('ETag')).to.be.false; pm.expect(pm.response.headers.has('Content-Encoding')).to.be.false; });",
+              "const p = pm.response.json().patient ?? pm.response.json();",
+              "pm.test('patient.id = 2 (number)', () => { pm.expect(p.id).to.be.a('number'); pm.expect(p.id).to.eql(2); });",
+              "pm.test('patient fields', () => { pm.expect(p.tcNo).to.match(/^\\d{11}$/); pm.expect(p.fullName).to.be.a('string'); pm.expect(p.birthDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/); pm.expect(p.bloodType).to.be.oneOf(['A+','A-','B+','B-','AB+','AB-','O+','O-']); });",
+              "pm.test('exact patient field names', () => pm.expect(Object.keys(p)).to.eql(['id','tcNo','fullName','birthDate','bloodType']));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/patients/2",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "patients",
+            "2"
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "Patient 3",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('Content-Type application/json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json/));",
+              "pm.test('no ETag / no compression', () => { pm.expect(pm.response.headers.has('ETag')).to.be.false; pm.expect(pm.response.headers.has('Content-Encoding')).to.be.false; });",
+              "const p = pm.response.json().patient ?? pm.response.json();",
+              "pm.test('patient.id = 3 (number)', () => { pm.expect(p.id).to.be.a('number'); pm.expect(p.id).to.eql(3); });",
+              "pm.test('patient fields', () => { pm.expect(p.tcNo).to.match(/^\\d{11}$/); pm.expect(p.fullName).to.be.a('string'); pm.expect(p.birthDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/); pm.expect(p.bloodType).to.be.oneOf(['A+','A-','B+','B-','AB+','AB-','O+','O-']); });",
+              "pm.test('exact patient field names', () => pm.expect(Object.keys(p)).to.eql(['id','tcNo','fullName','birthDate','bloodType']));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/patients/3",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "patients",
+            "3"
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "Patient 2 summary — no reports",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('Content-Type application/json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json/));",
+              "pm.test('no ETag / no compression', () => { pm.expect(pm.response.headers.has('ETag')).to.be.false; pm.expect(pm.response.headers.has('Content-Encoding')).to.be.false; });",
+              "const p = pm.response.json().patient ?? pm.response.json();",
+              "pm.test('patient.id = 2 (number)', () => { pm.expect(p.id).to.be.a('number'); pm.expect(p.id).to.eql(2); });",
+              "pm.test('patient fields', () => { pm.expect(p.tcNo).to.match(/^\\d{11}$/); pm.expect(p.fullName).to.be.a('string'); pm.expect(p.birthDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/); pm.expect(p.bloodType).to.be.oneOf(['A+','A-','B+','B-','AB+','AB-','O+','O-']); });",
+              "pm.test('exact patient field names', () => pm.expect(Object.keys(p)).to.eql(['id','tcNo','fullName','birthDate','bloodType']));",
+              "pm.test('latestReport is null', () => { const b = pm.response.json(); pm.expect(b).to.have.property('latestReport'); pm.expect(b.latestReport).to.be.null; });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/patients/2/summary",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "patients",
+            "2",
+            "summary"
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "Patient 2 lab-history — empty",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('Content-Type application/json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/json/));",
+              "pm.test('no ETag / no compression', () => { pm.expect(pm.response.headers.has('ETag')).to.be.false; pm.expect(pm.response.headers.has('Content-Encoding')).to.be.false; });",
+              "const p = pm.response.json().patient ?? pm.response.json();",
+              "pm.test('patient.id = 2 (number)', () => { pm.expect(p.id).to.be.a('number'); pm.expect(p.id).to.eql(2); });",
+              "pm.test('patient fields', () => { pm.expect(p.tcNo).to.match(/^\\d{11}$/); pm.expect(p.fullName).to.be.a('string'); pm.expect(p.birthDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/); pm.expect(p.bloodType).to.be.oneOf(['A+','A-','B+','B-','AB+','AB-','O+','O-']); });",
+              "pm.test('exact patient field names', () => pm.expect(Object.keys(p)).to.eql(['id','tcNo','fullName','birthDate','bloodType']));",
+              "pm.test('reports is []', () => pm.expect(pm.response.json().reports).to.eql([]));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/patients/2/lab-history",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "patients",
+            "2",
+            "lab-history"
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "404 — patient 1001",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('404', () => pm.response.to.have.status(404));",
+              "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/problem\\+json/));",
+              "const b = pm.response.json();",
+              "pm.test('ProblemDetail code=PATIENT_NOT_FOUND', () => { pm.expect(b.code).to.eql('PATIENT_NOT_FOUND'); pm.expect(b.status).to.eql(404); pm.expect(b.title).to.eql('Not Found'); pm.expect(b.type).to.eql('about:blank'); });",
+              "pm.test('instance = request path', () => pm.expect(b.instance).to.eql(pm.request.url.getPath()));",
+              "pm.test('detail', () => pm.expect(b.detail).to.eql('Patient 1001 not found'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/patients/1001/summary",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "patients",
+            "1001",
+            "summary"
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "400 — non-numeric id (abc)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('400', () => pm.response.to.have.status(400));",
+              "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/problem\\+json/));",
+              "const b = pm.response.json();",
+              "pm.test('ProblemDetail code=INVALID_ARGUMENT', () => { pm.expect(b.code).to.eql('INVALID_ARGUMENT'); pm.expect(b.status).to.eql(400); pm.expect(b.title).to.eql('Bad Request'); pm.expect(b.type).to.eql('about:blank'); });",
+              "pm.test('instance = request path', () => pm.expect(b.instance).to.eql(pm.request.url.getPath()));",
+              "pm.test('detail', () => pm.expect(b.detail).to.eql('patientId must be a positive 64-bit integer'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/patients/abc/summary",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "patients",
+            "abc",
+            "summary"
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "400 — overflow (2^63)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('400', () => pm.response.to.have.status(400));",
+              "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/problem\\+json/));",
+              "const b = pm.response.json();",
+              "pm.test('ProblemDetail code=INVALID_ARGUMENT', () => { pm.expect(b.code).to.eql('INVALID_ARGUMENT'); pm.expect(b.status).to.eql(400); pm.expect(b.title).to.eql('Bad Request'); pm.expect(b.type).to.eql('about:blank'); });",
+              "pm.test('instance = request path', () => pm.expect(b.instance).to.eql(pm.request.url.getPath()));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/patients/9223372036854775808/lab-history",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "patients",
+            "9223372036854775808",
+            "lab-history"
+          ]
+        },
+        "description": ""
+      }
+    },
+    {
+      "name": "400 — zero",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('400', () => pm.response.to.have.status(400));",
+              "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.match(/^application\\/problem\\+json/));",
+              "const b = pm.response.json();",
+              "pm.test('ProblemDetail code=INVALID_ARGUMENT', () => { pm.expect(b.code).to.eql('INVALID_ARGUMENT'); pm.expect(b.status).to.eql(400); pm.expect(b.title).to.eql('Bad Request'); pm.expect(b.type).to.eql('about:blank'); });",
+              "pm.test('instance = request path', () => pm.expect(b.instance).to.eql(pm.request.url.getPath()));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/patients/0/summary",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "patients",
+            "0",
+            "summary"
+          ]
+        },
+        "description": ""
+      }
+    }
+  ]
+}
