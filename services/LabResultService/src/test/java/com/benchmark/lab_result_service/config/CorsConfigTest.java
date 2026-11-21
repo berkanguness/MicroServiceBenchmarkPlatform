@@ -82,15 +82,21 @@ class CorsConfigTest {
             Mockito.when(service.getPatient(3)).thenReturn(GeneratedViews.patient(3));
         }
 
-        /** The real GraphQL endpoint answers a query (async dispatch, as Spring GraphQL's MVC handler is async). */
+        /**
+         * The real GraphQL endpoint answers a query, sent once. {@code GraphQlHttpHandler} answers with
+         * {@code ServerResponse.async(future)}, and Spring MVC writes a future that is already complete (our resolvers
+         * are synchronous) synchronously, without a servlet async dispatch. Only if async processing did start is the
+         * same result dispatched.
+         */
         ResultActions graphQlPost(String origin) throws Exception {
             var builder = post("/graphql").contentType(MediaType.APPLICATION_JSON).accept(MediaType.APPLICATION_JSON)
                     .content("{\"query\":\"{ patient(id: \\\"3\\\") { id } }\"}");
             if (origin != null) {
                 builder.header(HttpHeaders.ORIGIN, origin);
             }
-            MvcResult started = mvc.perform(builder).andReturn();
-            return started.getRequest().isAsyncStarted() ? mvc.perform(asyncDispatch(started)) : mvc.perform(builder);
+            ResultActions sent = mvc.perform(builder);
+            MvcResult result = sent.andReturn();
+            return result.getRequest().isAsyncStarted() ? mvc.perform(asyncDispatch(result)) : sent;
         }
 
         ResultActions preflight(String path, String method) throws Exception {

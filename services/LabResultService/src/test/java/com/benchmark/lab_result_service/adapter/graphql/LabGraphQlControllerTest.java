@@ -32,7 +32,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.graphql.test.autoconfigure.GraphQlTest;
+import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.InvalidDataAccessResourceUsageException;
 import org.springframework.graphql.ResponseError;
@@ -53,12 +55,15 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @GraphQlTest(LabGraphQlController.class)
 @Import(GraphQlExceptionResolver.class)
+@ImportAutoConfiguration(JacksonAutoConfiguration.class)
 class LabGraphQlControllerTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final String SECRET = "FATAL: password authentication failed for user \"lab\" at jdbc:postgresql://db:5432/labdb";
 
     @Autowired GraphQlTester graphQl;
+    /** Boot's {@code JsonMapper} bean: the one Boot's MVC JSON converter, and so the REST adapter, writes with. */
+    @Autowired JsonMapper bootJsonMapper;
     @MockitoBean LabResultQueryService service;
     /** The slice also picks up {@code @ControllerAdvice} beans (the REST handler needs it); nothing here may record. */
     @MockitoBean LabErrorRecorder recorder;
@@ -134,7 +139,8 @@ class LabGraphQlControllerTest {
     /**
      * Contract §7.2 said {@code INFERRED 80%}: graphql-java's String coercion ({@code toString()}) equals Jackson 3's
      * ISO output. Pinned here for the cases the golden files do not contain: a whole minute ({@code :00} seconds must
-     * still be printed), the epoch, a date before 1970 and a leap day. Jackson writes them as the REST adapter does.
+     * still be printed), the epoch, a date before 1970 and a leap day, each compared with what Boot's {@code JsonMapper}
+     * bean (the REST adapter's) writes.
      */
     @Test
     void dateAndInstantStringsEqualJackson3() {
@@ -150,12 +156,13 @@ class LabGraphQlControllerTest {
             GraphQlTester.Response response = execute("S1", "9");
 
             response.path("patientSummary.latestReport.createdAt").entity(String.class)
-                    .isEqualTo(JSON.readTree(JSON.writeValueAsString(createdAt)).asString());
+                    .isEqualTo(bootJsonMapper.readTree(bootJsonMapper.writeValueAsString(createdAt)).asString());
             response.path("patientSummary.patient.birthDate").entity(String.class)
-                    .isEqualTo(JSON.readTree(JSON.writeValueAsString(birthDate)).asString());
+                    .isEqualTo(bootJsonMapper.readTree(bootJsonMapper.writeValueAsString(birthDate)).asString());
             response.path("patientSummary.latestReport.items[0].resultValue").entity(Double.class).isEqualTo(100.0);
         }
-        assertThat(JSON.writeValueAsString(Instant.parse("2025-12-31T17:03:00Z"))).isEqualTo("\"2025-12-31T17:03:00Z\"");
+        assertThat(bootJsonMapper.writeValueAsString(Instant.parse("2025-12-31T17:03:00Z")))
+                .isEqualTo("\"2025-12-31T17:03:00Z\"");
     }
 
     // ------------------------------------------------------------------------------------------------- errors
