@@ -28,8 +28,9 @@ import org.springframework.web.context.request.async.AsyncRequestNotUsableExcept
  * <ul>
  *   <li>Scoped to {@link PatientRestController}: unmatched routes and wrong methods have no handler of ours and keep
  *       Spring's default 404/405 handling.</li>
- *   <li>Spring's own web exceptions ({@link ErrorResponse}, e.g. an unsatisfiable {@code Accept}) are rethrown
- *       unrecorded, so Spring's default resolver keeps handling them; they are not service outcomes (§7.4 lists none).</li>
+ *   <li>Spring's own 4xx web exceptions ({@link ErrorResponse} with a 4xx status, e.g. an unsatisfiable
+ *       {@code Accept}) are rethrown unrecorded, so Spring's default resolver keeps handling them; they are not service
+ *       outcomes (§7.4 lists none). A 5xx {@code ErrorResponse} is not passed through: it is {@code INTERNAL}.</li>
  *   <li>5xx {@code detail} is fixed text, never an exception message, SQL or stack trace.</li>
  *   <li>A client that disconnected is recorded as {@code CLIENT_ABORTED} and nothing is written to the dead
  *       connection. Detection is by type only ({@link #isClientAbort}); an exception message such as "Broken pipe" is
@@ -70,7 +71,7 @@ public class RestExceptionHandler {
             recorder.record(Protocol.REST, ErrorCode.CLIENT_ABORTED, e);
             return null;                                   // handled; the client is gone, write nothing
         }
-        if (e instanceof ErrorResponse) {
+        if (e instanceof ErrorResponse framework && framework.getStatusCode().is4xxClientError()) {
             throw e;                                       // Spring default handling (DefaultHandlerExceptionResolver)
         }
         recorder.record(Protocol.REST, ErrorCode.INTERNAL, e);

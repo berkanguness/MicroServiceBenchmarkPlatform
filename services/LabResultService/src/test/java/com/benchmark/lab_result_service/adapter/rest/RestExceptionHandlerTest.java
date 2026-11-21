@@ -16,10 +16,12 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import org.apache.catalina.connector.ClientAbortException;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotWritableException;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Client aborts (§3.4/§7.4) are not tested end to end (P8 manual check); this pins the classification: a disconnect
@@ -53,6 +55,18 @@ class RestExceptionHandlerTest {
 
         assertThatThrownBy(() -> handler.handleOther(e, request)).isSameAs(e);
         verifyNoInteractions(recorder);
+    }
+
+    /** Only framework 4xx rejections pass through unrecorded; a 5xx ErrorResponse is INTERNAL, recorded once. */
+    @Test
+    void aFrameworkErrorResponseWith5xxIsInternal() throws Exception {
+        var e = new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "framework 503");
+
+        var response = handler.handleOther(e, request);
+        assertThat(response).isNotNull();
+        assertThat(response.getStatusCode().value()).isEqualTo(500);
+        verify(recorder).record(Protocol.REST, ErrorCode.INTERNAL, e);
+        verifyNoMoreInteractions(recorder);
     }
 
     /** Referee finding (codex #1): a "Broken pipe" message without a typed disconnect is not a client abort. */
