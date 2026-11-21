@@ -1,5 +1,5 @@
-# LabResultService — default profile (contract §8.1). Keys of later phases (GraphQL, management/metrics, CORS,
-# seeding, verification) are added by the phase that introduces them.
+# LabResultService — default profile (contract §8.1). Keys of later phases (management/metrics) are added by the phase
+# that introduces them.
 spring:
   application:
     name: lab-result-service
@@ -45,6 +45,16 @@ spring:
           use_query_cache: false
   flyway:
     enabled: true
+  # P5 GraphQL (contract §7.2, §8.1): POST /graphql on 8080. Introspection and GraphiQL are off by default and in bench;
+  # only the "docs" profile (application-docs.yaml, for humans, never a benchmark profile) turns them on.
+  graphql:
+    http:
+      path: /graphql
+    schema:
+      introspection:
+        enabled: false
+    graphiql:
+      enabled: false
   grpc:
     server:
       port: 9091

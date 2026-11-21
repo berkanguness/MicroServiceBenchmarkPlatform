@@ -1,0 +1,9 @@
+# Profile "docs" (contract §8, §8.1): GraphQL schema introspection and the GraphiQL UI (GET /graphiql) for humans
+# exploring the API on a developer machine. Never a benchmark profile: bench/bench-nomon keep both off.
+spring:
+  graphql:
+    schema:
+      introspection:
+        enabled: true
+    graphiql:
+      enabled: true
