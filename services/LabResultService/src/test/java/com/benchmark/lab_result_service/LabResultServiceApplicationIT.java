@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.util.ClassUtils;
 
 /** The application context starts against Testcontainers PostgreSQL 17 (replaces the generated contextLoads test). */
 class LabResultServiceApplicationIT extends AbstractPostgresIT {
@@ -45,32 +46,21 @@ class LabResultServiceApplicationIT extends AbstractPostgresIT {
         assertThat(hikari.getValidationTimeout()).isEqualTo(1_000).isLessThan(hikari.getConnectionTimeout());
     }
 
-    /** P4 (R4): springdoc is on the classpath but inert unless the "docs" profile is active (contract §8.1). */
-    @Test
-    void springdocIsOffOutsideTheDocsProfile() {
-        assertThat(context.getEnvironment().getActiveProfiles()).doesNotContain("docs");
-        assertThat(context.getBeanNamesForType(org.springdoc.webmvc.api.OpenApiWebMvcResource.class)).isEmpty();
-        assertThat(context.getBeanNamesForType(org.springdoc.webmvc.ui.SwaggerWelcomeWebMvc.class)).isEmpty();
-    }
-
     /**
-     * P4: springdoc brings Jackson 2 (jackson-dataformat-yaml) onto the classpath, so Spring MVC also registers
-     * {@code MappingJackson2YamlHttpMessageConverter} (application/yaml). JSON must still be written by Boot 4's one
-     * Jackson 3 converter (the golden files pin its output), and it must come before the YAML converter. The REST
-     * controller declares {@code produces=application/json}, so YAML is never negotiated for it
-     * ({@code PatientRestControllerTest#yamlIsNotNegotiable}).
+     * P4 fix round: springdoc was dropped (R4 is covered by the Postman collection), and with it Jackson 2
+     * ({@code com.fasterxml.jackson.core:jackson-databind}, {@code jackson-dataformat-yaml}). JSON is written by
+     * Boot 4's one Jackson 3 converter (the golden files pin its output); no Jackson 2 JSON or YAML converter is
+     * registered, and no springdoc class is on the classpath.
      */
     @Test
     void jsonIsWrittenByTheJackson3ConverterOnly() {
         var adapter = context.getBean(org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.class);
         var names = adapter.getMessageConverters().stream().map(c -> c.getClass().getName()).toList();
-        String jackson3 = "org.springframework.http.converter.json.JacksonJsonHttpMessageConverter";
-        assertThat(names).contains(jackson3)
-                .noneMatch(name -> name.startsWith("org.springframework.http.converter.json.") && name.contains("Jackson2"));
-        int yaml = names.indexOf("org.springframework.http.converter.yaml.MappingJackson2YamlHttpMessageConverter");
-        if (yaml >= 0) {
-            assertThat(names.indexOf(jackson3)).as("JSON converter before the YAML one").isLessThan(yaml);
-        }
+        assertThat(names).contains("org.springframework.http.converter.json.JacksonJsonHttpMessageConverter")
+                .noneMatch(name -> name.contains("Jackson2"))
+                .noneMatch(name -> name.startsWith("org.springframework.http.converter.yaml."));
+        assertThat(ClassUtils.isPresent("com.fasterxml.jackson.databind.ObjectMapper", null)).as("Jackson 2 databind").isFalse();
+        assertThat(ClassUtils.isPresent("org.springdoc.core.configuration.SpringDocConfiguration", null)).as("springdoc").isFalse();
     }
 
     @Test

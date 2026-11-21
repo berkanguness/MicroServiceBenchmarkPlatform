@@ -112,13 +112,6 @@
 			<version>1.5.1</version>
 			<scope>test</scope>
 		</dependency>
-		<!-- P4 (R4, contract §9.1): OpenAPI docs, the single pre-approved non-BOM dependency (pinned, Apache-2.0).
-		     Inert unless the "docs" profile enables springdoc.api-docs / springdoc.swagger-ui. -->
-		<dependency>
-			<groupId>org.springdoc</groupId>
-			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-			<version>3.1.1</version>
-		</dependency>
 		<dependency>
 			<groupId>com.benchmark</groupId>
 			<artifactId>common-proto</artifactId>

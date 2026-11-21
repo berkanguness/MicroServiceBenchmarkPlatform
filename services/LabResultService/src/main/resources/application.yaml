@@ -49,13 +49,6 @@ spring:
     server:
       port: 9091
 
-# P4 (R4): springdoc is on the classpath but off by default; only the "docs" profile enables it (application-docs.yaml).
-springdoc:
-  api-docs:
-    enabled: false
-  swagger-ui:
-    enabled: false
-
 server:
   port: 8080
   tomcat:
