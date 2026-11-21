@@ -219,11 +219,15 @@ public class DefaultLabResultQueryService implements LabResultQueryService {
      * @return a {@link ServiceUnavailableException} wrapping the unavailability cause, or {@code thrown} unchanged
      */
     static RuntimeException translate(RuntimeException thrown, @Nullable RuntimeException callbackFailure) {
-        if (isUnavailable(thrown)) {
+        // Checked first, so it also decides a dual fault: if the rollback failure itself carries a connection-loss
+        // SQLState, the connection really is gone and the call is UNAVAILABLE, whatever the callback threw (even an
+        // ordinary SQL error such as 42P01).
+        if (isUnavailable(thrown) || isFailedRollbackOnALostConnection(thrown)) {
             return new ServiceUnavailableException(thrown);
         }
         // The rollback failed after the callback had failed: classify by the callback's exception. An ordinary SQL
-        // error masked by a failed rollback is therefore still INTERNAL (thrown is returned unchanged).
+        // error masked by a rollback failure without a connection-loss SQLState (e.g. Hikari's "Connection is
+        // closed", no SQLState) is therefore still INTERNAL (thrown is returned unchanged).
         if (callbackFailure != null && callbackFailure != thrown && isUnavailable(callbackFailure)) {
             return new ServiceUnavailableException(callbackFailure);
         }
@@ -233,6 +237,15 @@ public class DefaultLabResultQueryService implements LabResultQueryService {
             return new ServiceUnavailableException(app);
         }
         return thrown;
+    }
+
+    /**
+     * Dual fault, rollback side: {@link TransactionTemplate} rethrows a failed rollback either translated (a
+     * {@code DataAccessException}, covered by {@link #isUnavailable}) or as a {@link TransactionSystemException},
+     * which is not a {@code DataAccessException}. The latter counts as a lost connection by the same SQLState rule.
+     */
+    static boolean isFailedRollbackOnALostConnection(Throwable thrown) {
+        return thrown instanceof TransactionSystemException && hasConnectionLossSqlState(thrown);
     }
 
     /**
