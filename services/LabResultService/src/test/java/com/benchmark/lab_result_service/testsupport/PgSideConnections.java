@@ -10,10 +10,14 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
@@ -32,6 +36,9 @@ public final class PgSideConnections {
 
     /** Socket timeout of the test's own connections, so cleanup can never hang forever. */
     private static final String HELPER_SOCKET_TIMEOUT_S = "10";
+
+    /** Container id + fixture resource of every fixture already loaded (see {@link #loadFixtureOnce}). */
+    private static final Set<String> FIXTURES_LOADED = new HashSet<>();
 
     /** Finds the app backend that is executing a {@code lab_report} statement and is blocked by the locker. */
     private static final String BLOCKED_BACKEND = """
@@ -59,6 +66,29 @@ public final class PgSideConnections {
         props.setProperty("ApplicationName", applicationName);
         props.setProperty("socketTimeout", HELPER_SOCKET_TIMEOUT_S);
         return DriverManager.getConnection(postgres.getJdbcUrl(), props);
+    }
+
+    /**
+     * Loads a classpath SQL fixture (e.g. {@code /fixtures/p1-fixture.sql}) once per container, through a test-only
+     * connection of {@link #open} (autocommit, socket timeout {@value #HELPER_SOCKET_TIMEOUT_S} s).
+     *
+     * <p>For chaos ITs that shorten the app's {@code socketTimeout} (1 s): {@code @Sql} would run the fixture through
+     * the app's datasource and so under that short timeout, which a slow, freshly started container can exceed
+     * (referee REPRODUCED: {@code SocketTimeoutException} in statement #3 of the fixture). Setup is therefore never
+     * bound by the timeout under test. Call it from {@code @BeforeEach}: the Spring context, and with it Flyway's
+     * schema, exists by then; the container id makes repeated calls in the same class a no-op.
+     */
+    public static void loadFixtureOnce(PostgreSQLContainer postgres, String classpathResource) throws SQLException {
+        String key = postgres.getContainerId() + classpathResource;
+        synchronized (FIXTURES_LOADED) {
+            if (FIXTURES_LOADED.contains(key)) {
+                return;
+            }
+            try (Connection connection = open(postgres, "ym491-fixture-loader")) {
+                ScriptUtils.executeSqlScript(connection, new ClassPathResource(classpathResource));
+            }
+            FIXTURES_LOADED.add(key);
+        }
     }
 
     public static int backendPid(Connection connection) throws SQLException {

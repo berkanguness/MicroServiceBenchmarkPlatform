@@ -19,17 +19,18 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.postgresql.util.PSQLException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.test.context.TestPropertySource;
-import org.springframework.test.context.jdbc.Sql;
 
 /**
- * Chaos T-2 (findings F1 + F2): the database hangs while a statement is in flight. The JDBC {@code socketTimeout}
- * (lowered to 1 s here; 5 s by default) must end the blocked read, and the resulting mid-transaction connection loss,
- * whose rollback then fails, must still be classified as {@link ServiceUnavailableException} by the shared service.
+ * Chaos T-2 (findings F1 + F2), shared service level: an in-flight statement that receives no bytes for the JDBC
+ * {@code socketTimeout} (lowered to 1 s here; 5 s by default) is cut by the driver, and the resulting mid-transaction
+ * connection loss, whose rollback then fails, is classified as {@link ServiceUnavailableException}.
  *
  * <p>Synchronization (no fixed sleeps): a test-only connection outside the Hikari pool takes an
  * {@code ACCESS EXCLUSIVE} lock on {@code lab_report}. The real {@code getPatientSummary} call (real service, real
@@ -40,12 +41,17 @@ import org.springframework.test.context.jdbc.Sql;
  * be running at that moment. So the fault provably hits an executing statement, not pool acquisition or validation
  * (that is {@code HungDatabaseIT}, F3).
  *
+ * <p>What is and is not proven: the read is already starved by the lock wait, and the P4 referee REPRODUCED that the
+ * same pattern passes without {@code docker pause}. So this test proves that a statement whose read gets no bytes for
+ * {@code socketTimeout} is bounded and ends as UNAVAILABLE; it does not prove that a frozen server, as opposed to a
+ * lock wait, starved the read (the socket mechanism is identical). The pause is kept so the failed rollback and close
+ * meet a frozen server, and the recovery after unpause is real.
+ *
  * <p>pgjdbc's {@code socketTimeout} is a read <em>inactivity</em> timeout whose clock starts when the driver begins
  * reading the statement's response, so the measured time includes the short lock wait before the pause. Every
  * cleanup step (unpause, lock release, executor shutdown) runs in its own {@code finally}, also when a Docker command
  * throws.
  */
-@Sql(scripts = "/fixtures/p1-fixture.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_CLASS)
 @TestPropertySource(properties = "spring.datasource.hikari.data-source-properties.socketTimeout=" + InFlightHungDatabaseIT.SOCKET_TIMEOUT_S)
 class InFlightHungDatabaseIT extends AbstractPostgresIT {
 
@@ -60,8 +66,19 @@ class InFlightHungDatabaseIT extends AbstractPostgresIT {
     @Autowired LabResultQueryService service;
     @Autowired MeterRegistry registry;
 
+    /**
+     * The P1 fixture is loaded through a test-only connection, not {@code @Sql}: {@code @Sql} would use the app's
+     * datasource and so the 1 s {@code socketTimeout} under test (referee REPRODUCED a {@code SocketTimeoutException}
+     * while loading the fixture).
+     */
+    @BeforeEach
+    void loadFixture() throws Exception {
+        PgSideConnections.loadFixtureOnce(postgres, "/fixtures/p1-fixture.sql");
+    }
+
     @Test
-    void statementAgainstAHungDatabaseEndsAsUnavailableWithinTheSocketTimeout() throws Exception {
+    @DisplayName("T-2: in-flight statement receiving no bytes for socketTimeout is cut → UNAVAILABLE")
+    void inFlightStatementWithoutBytesForTheSocketTimeoutEndsAsUnavailable() throws Exception {
         assertThat(service.getPatientSummary(3).latestReport()).as("healthy call before the fault").isNotNull();
         double unavailableBefore = unavailableCount();
 
@@ -96,7 +113,7 @@ class InFlightHungDatabaseIT extends AbstractPostgresIT {
 
                     assertThat(failure).as("outcome of the in-flight call").isInstanceOf(ServiceUnavailableException.class);
                     assertEndedByTheExecutingQuery(failure);
-                    assertThat(elapsedMs).as("time to UNAVAILABLE against a hung database").isLessThanOrEqualTo(MAX_ELAPSED_MS);
+                    assertThat(elapsedMs).as("time to UNAVAILABLE for a read without bytes").isLessThanOrEqualTo(MAX_ELAPSED_MS);
                     assertThat(unavailableCount() - unavailableBefore).as("lab.service.calls{outcome=UNAVAILABLE}").isEqualTo(1);
                 } finally {
                     PgSideConnections.unpauseIfPaused(docker, id);

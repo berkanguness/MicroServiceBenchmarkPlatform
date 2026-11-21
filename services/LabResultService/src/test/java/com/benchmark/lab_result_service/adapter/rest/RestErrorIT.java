@@ -18,12 +18,12 @@ import com.zaxxer.hikari.HikariDataSource;
 import com.zaxxer.hikari.HikariPoolMXBean;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.io.IOException;
-import java.net.ServerSocket;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.sql.Connection;
 import java.sql.SQLTransientConnectionException;
 import java.time.Duration;
@@ -36,6 +36,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -50,7 +51,6 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
-import org.springframework.test.context.jdbc.Sql;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -71,13 +71,17 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li>(a) pool exhaustion → 503 after ≈ {@code connection-timeout} (2000 ms)</li>
  *   <li>(b) DB down at transaction begin (deterministic order N1) → cause chain proves the transaction-begin path</li>
  *   <li>(c) connection lost mid-transaction (backend terminated while its statement executes; the rollback then fails, F2)</li>
- *   <li>(d) hung DB during an executing statement, bounded by {@code socketTimeout} (F1)</li>
- *   <li>(e) T-7 recovery: DB stopped → 503 → DB started → 200 within 10 s, same context</li>
+ *   <li>(d) an in-flight statement that receives no bytes for {@code socketTimeout} is cut and mapped to 503 (F1).
+ *       What starves the read is the side-connection lock; the referee showed (d) passes without the pause too, so
+ *       the pause is not what is proven (see the case's Javadoc)</li>
+ *   <li>(e) T-7 recovery: DB server stopped → 503 → started → first 200 within 10 s (deadline-bounded), same
+ *       context</li>
  * </ul>
  */
 class RestErrorIT {
 
     static final String SUMMARY = "/api/v1/patients/3/summary";
+    static final String FIXTURE = "/fixtures/p1-fixture.sql";
     static final String UNAVAILABLE_DETAIL = "Service temporarily unavailable";
     static final JsonMapper JSON = JsonMapper.builder().build();
 
@@ -86,7 +90,6 @@ class RestErrorIT {
     @ActiveProfiles("test")
     @Testcontainers
     @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-    @Sql(scripts = "/fixtures/p1-fixture.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_CLASS)
     abstract static class Case {
 
         @LocalServerPort int port;
@@ -102,6 +105,8 @@ class RestErrorIT {
 
         @BeforeEach
         void healthyFirst() throws Exception {
+            // Not @Sql: that would run through the app's datasource, i.e. under (d)'s 1 s socketTimeout (flaky setup).
+            PgSideConnections.loadFixtureOnce(postgres(), FIXTURE);
             HttpResponse<String> ok = get(SUMMARY);
             assertThat(ok.statusCode()).as("healthy call before the fault").isEqualTo(200);
             assertThat(JSON.readTree(ok.body()).get("latestReport").get("id").asLong()).isEqualTo(101);
@@ -110,8 +115,12 @@ class RestErrorIT {
         }
 
         HttpResponse<String> get(String path) throws IOException, InterruptedException {
+            return get(path, Duration.ofSeconds(30));
+        }
+
+        HttpResponse<String> get(String path, Duration timeout) throws IOException, InterruptedException {
             HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
-                    .timeout(Duration.ofSeconds(30)).GET().build();
+                    .timeout(timeout).GET().build();
             return http.send(request, HttpResponse.BodyHandlers.ofString());
         }
 
@@ -267,8 +276,19 @@ class RestErrorIT {
         }
     }
 
-    // ------------------------------------------------------------------------------------ (d) hung, in flight
+    // ----------------------------------------------------------------------- (d) in-flight read without bytes
 
+    /**
+     * What this proves: an in-flight statement whose read receives no bytes for {@code socketTimeout} (1 s here) is
+     * cut by the driver and ends as 503 {@code UNAVAILABLE}, with {@code SocketTimeoutException} in the chain and no
+     * pool-acquisition failure. The read is starved by the side-connection lock ({@code pg_blocking_pids}); the
+     * referee REPRODUCED that the case also passes without {@code docker pause}, so it does <em>not</em> prove that a
+     * frozen server, as opposed to a lock wait, is what bounded the read (the socket mechanism is the same).
+     *
+     * <p>The pause is kept for the realism of what follows the cut: the rollback and close of the broken connection
+     * meet a frozen server, and the final 200 after unpause shows that the pool's other connections survive a
+     * frozen-then-resumed server without a restart.
+     */
     @Nested
     @TestPropertySource(properties = "spring.datasource.hikari.data-source-properties.socketTimeout=" + HungDuringStatement.SOCKET_TIMEOUT_S)
     class HungDuringStatement extends Case {
@@ -283,7 +303,8 @@ class RestErrorIT {
         @Override PostgreSQLContainer postgres() { return postgres; }
 
         @Test
-        void hungDatabaseIsBoundedBySocketTimeoutAnd503() throws Exception {
+        @DisplayName("(d) in-flight statement receiving no bytes for socketTimeout is cut → 503 UNAVAILABLE")
+        void inFlightStatementWithoutBytesForTheSocketTimeoutIs503() throws Exception {
             var docker = postgres.getDockerClient();
             String id = postgres.getContainerId();
             ExecutorService caller = Executors.newSingleThreadExecutor();
@@ -299,7 +320,7 @@ class RestErrorIT {
                     BlockedBackend blocked = PgSideConnections.awaitBlockedBackend(monitor, lockerPid, call);
                     try {
                         docker.pauseContainerCmd(id).exec();
-                        assertThat(call.isDone()).as("the request is still executing when the database hangs").isFalse();
+                        assertThat(call.isDone()).as("the request is still executing when the container is paused").isFalse();
                         System.out.printf("RestErrorIT(d) paused while backend executed: %s%n", blocked);
                         try {
                             response = call.get(6, TimeUnit.SECONDS);
@@ -318,7 +339,7 @@ class RestErrorIT {
             } finally {
                 caller.shutdownNow();
             }
-            System.out.printf("RestErrorIT(d) hung DB: 503 after %d ms%n", elapsed);
+            System.out.printf("RestErrorIT(d) in-flight read without bytes: 503 after %d ms%n", elapsed);
 
             ServiceUnavailableException cause = assertUnavailable(response);
             assertThat(cause.getCause()).isInstanceOf(DataAccessResourceFailureException.class);
@@ -331,58 +352,81 @@ class RestErrorIT {
 
     // ---------------------------------------------------------------------------------------- (e) T-7 recovery
 
+    /**
+     * T-7: the database server stops (fast shutdown, as {@code docker stop} does) → 503 → it starts again → 200 within
+     * {@link #RECOVERY_BUDGET_MS}, same Spring context and pool.
+     *
+     * <p>Port handling (race-free): the server is stopped and started <em>inside</em> a container that keeps running
+     * ({@code pg_ctl stop -m fast} / {@code pg_ctl start} over {@code docker exec}). The container's PID 1 is a
+     * keep-alive shell, not PostgreSQL, so the host port that Docker allocated at container start stays bound to
+     * this container for its whole life, and the app's datasource URL stays valid. Nothing picks a free port and
+     * releases it for someone else to take (the former {@code ServerSocket(0)} race).
+     */
     @Nested
     class RecoveryAfterRestart extends Case {
 
         static final long RECOVERY_BUDGET_MS = 10_000;
 
-        /** Fixed host port: a stopped and restarted container keeps it, so the app's datasource URL stays valid. */
+        /** PID 1 keeps the container alive while the server is down; the image's entrypoint starts the server as usual. */
+        private static final String KEEP_ALIVE = "docker-entrypoint.sh postgres -c fsync=off & while true; do sleep 3600; done";
+
         @Container @ServiceConnection
-        static final PostgreSQLContainer postgres = fixedPort(new PostgreSQLContainer(AbstractPostgresIT.POSTGRES_IMAGE));
+        static final PostgreSQLContainer postgres = new PostgreSQLContainer(AbstractPostgresIT.POSTGRES_IMAGE)
+                .withCreateContainerCmdModifier(cmd -> cmd.withEntrypoint("sh", "-c", KEEP_ALIVE));
 
         @Override PostgreSQLContainer postgres() { return postgres; }
 
         @Test
         void databaseStopGives503AndStartRecoversWithin10sWithoutContextRestart() throws Exception {
-            var docker = postgres.getDockerClient();
-            String id = postgres.getContainerId();
-            HttpResponse<String> down;
+            boolean stopped = false;
             try {
-                docker.stopContainerCmd(id).withTimeout(10).exec();
+                pgCtl("-m fast -w stop");
+                stopped = true;
                 long start = System.nanoTime();
-                down = get(SUMMARY);
+                HttpResponse<String> down = get(SUMMARY);
                 System.out.printf("RestErrorIT(e) DB stopped: %d after %d ms%n", down.statusCode(), millisSince(start));
                 assertUnavailable(down);
             } finally {
-                if (!Boolean.TRUE.equals(docker.inspectContainerCmd(id).exec().getState().getRunning())) {
-                    docker.startContainerCmd(id).exec();
+                if (stopped) {
+                    startServer();
                 }
             }
+        }
 
+        /** Starts the server and asserts the first 200 arrives within the budget; every attempt is bounded by it. */
+        private void startServer() throws Exception {
             long started = System.nanoTime();
-            int status = 0;
+            long deadline = started + TimeUnit.MILLISECONDS.toNanos(RECOVERY_BUDGET_MS);
+            pgCtl("-l /tmp/ym491-restart.log start");               // no -w: the clock covers the server's startup
             int attempts = 0;
-            while (millisSince(started) <= RECOVERY_BUDGET_MS) {
+            while (true) {
+                long remainingMs = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+                if (remainingMs <= 0) {
+                    fail("no 200 within %d ms after the database start (%d attempts)", RECOVERY_BUDGET_MS, attempts);
+                }
                 attempts++;
-                status = get(SUMMARY).statusCode();
+                int status;
+                try {
+                    status = get(SUMMARY, Duration.ofMillis(remainingMs)).statusCode();
+                } catch (HttpTimeoutException e) {
+                    fail("attempt %d still had no response when the %d ms budget ran out", attempts, RECOVERY_BUDGET_MS);
+                    return;
+                }
                 if (status == 200) {
                     break;
                 }
                 assertThat(status).as("only UNAVAILABLE while the database starts").isEqualTo(503);
-                Thread.sleep(100);
+                Thread.sleep(Math.min(100, Math.max(1, TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()))));
             }
             long recoveredMs = millisSince(started);
             System.out.printf("RestErrorIT(e) first 200 %d ms after DB start (%d attempts)%n", recoveredMs, attempts);
-            assertThat(status).as("200 within %d ms after the database is back", RECOVERY_BUDGET_MS).isEqualTo(200);
+            assertThat(recoveredMs).as("first 200 within %d ms after the database start", RECOVERY_BUDGET_MS)
+                    .isLessThanOrEqualTo(RECOVERY_BUDGET_MS);
         }
 
-        private static PostgreSQLContainer fixedPort(PostgreSQLContainer container) {
-            try (ServerSocket socket = new ServerSocket(0)) {
-                container.setPortBindings(List.of("127.0.0.1:" + socket.getLocalPort() + ":5432"));
-            } catch (IOException e) {
-                throw new IllegalStateException(e);
-            }
-            return container;
+        private static void pgCtl(String args) throws Exception {
+            var result = postgres.execInContainerWithUser("postgres", "sh", "-c", "pg_ctl -D \"$PGDATA\" " + args);
+            assertThat(result.getExitCode()).as("pg_ctl %s: %s %s", args, result.getStdout(), result.getStderr()).isZero();
         }
     }
 }
