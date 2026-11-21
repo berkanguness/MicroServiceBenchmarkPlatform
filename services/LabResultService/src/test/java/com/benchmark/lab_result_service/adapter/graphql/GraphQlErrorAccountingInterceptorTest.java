@@ -24,8 +24,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -53,6 +58,8 @@ class GraphQlErrorAccountingInterceptorTest {
     private final LabErrorRecorder recorder = mock(LabErrorRecorder.class);
     private final ExecutorService pool = Executors.newFixedThreadPool(2, r -> new Thread(r, "not-a-request-thread"));
     private final Map<String, String> resolverThreads = new ConcurrentHashMap<>();
+    /** Opened by {@link #execute} once graphql-java has attached its continuations; see {@link #async}. */
+    private final CountDownLatch gate = new CountDownLatch(1);
 
     @AfterEach
     void shutdown() {
@@ -60,8 +67,9 @@ class GraphQlErrorAccountingInterceptorTest {
     }
 
     /**
-     * The exception surfaces on a pool thread (an async data fetcher), so the resolver runs there, not on the thread
-     * that sent the request. The holder is reached through the GraphQL context, not a thread-local: recorded once.
+     * The exception surfaces on a pool thread (an async data fetcher, see {@link #async}), so the resolver runs there,
+     * not on the thread that sent the request. The holder is reached through the GraphQL context, not a thread-local:
+     * recorded once. Repeated because a scheduling-dependent helper once let this pass or fail by chance.
      */
     @org.junit.jupiter.api.RepeatedTest(25)
     void anExceptionResolvedOnAnotherThreadIsRecordedOnce() {
@@ -215,21 +223,27 @@ class GraphQlErrorAccountingInterceptorTest {
 
     /**
      * A data fetcher whose result (or exception) is produced on a pool thread. The pool thread completes the future
-     * only after graphql-java has attached its continuation ({@code getNumberOfDependents() > 0}), so the
-     * continuation, and with it the exception resolver, deterministically runs on the pool thread. A plain
-     * {@code supplyAsync} can complete first, and the continuation then runs on the calling thread (seen as a flaky
-     * run before this helper).
+     * only after {@link #execute} has opened {@link #gate}, which it does once the subscription to the handler has
+     * returned. Subscribing runs graphql-java's {@code executeAsync} synchronously on the calling thread (no scheduler
+     * hop in Spring GraphQL's handler chain), so by then every continuation is attached, including the one on the
+     * future Spring derives from ours ({@code ContextDataFetcherDecorator}: {@code Mono.toFuture()}). Completing the
+     * future therefore runs that continuation, and with it the exception resolver, on the pool thread. Waiting for
+     * dependents of our own future is not enough: Spring's subscriber is attached to it before graphql-java's
+     * continuation exists (flaky at 9908621).
      */
-    private <T> DataFetcher<CompletableFuture<T>> async(java.util.function.Supplier<T> body) {
+    private <T> DataFetcher<CompletableFuture<T>> async(Supplier<T> body) {
         return env -> {
             CompletableFuture<T> future = new CompletableFuture<>();
             pool.execute(() -> {
-                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-                while (future.getNumberOfDependents() == 0 && System.nanoTime() < deadline) {
-                    Thread.onSpinWait();
-                }
                 try {
+                    if (!gate.await(5, TimeUnit.SECONDS)) {
+                        future.completeExceptionally(new IllegalStateException("test gate never opened"));
+                        return;
+                    }
                     future.complete(body.get());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    future.completeExceptionally(e);
                 } catch (RuntimeException e) {
                     future.completeExceptionally(e);
                 }
@@ -238,10 +252,19 @@ class GraphQlErrorAccountingInterceptorTest {
         };
     }
 
-    private static WebGraphQlResponse execute(WebGraphQlHandler handler, String document) {
+    /** Subscribes (which executes the document up to its async fields), opens {@link #gate}, then waits. */
+    private WebGraphQlResponse execute(WebGraphQlHandler handler, String document) {
         WebGraphQlRequest request = new WebGraphQlRequest(URI.create("http://localhost/graphql"), new HttpHeaders(),
                 new LinkedMultiValueMap<>(), Map.of(), Map.of("query", document), "1", null);
-        return handler.handleRequest(request).block(java.time.Duration.ofSeconds(10));
+        CompletableFuture<WebGraphQlResponse> response = handler.handleRequest(request).toFuture();
+        gate.countDown();
+        try {
+            return response.get(10, TimeUnit.SECONDS);
+        } catch (ExecutionException e) {
+            throw e.getCause() instanceof RuntimeException r ? r : new IllegalStateException(e.getCause());
+        } catch (InterruptedException | TimeoutException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private static RuntimeException exception(ErrorCode code) {
