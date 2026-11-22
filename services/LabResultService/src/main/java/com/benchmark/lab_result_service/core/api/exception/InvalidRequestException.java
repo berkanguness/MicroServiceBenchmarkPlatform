@@ -1,4 +1,6 @@
-package com.benchmark.lab_result_service.core.api;
+package com.benchmark.lab_result_service.core.api.exception;
+
+import com.benchmark.lab_result_service.core.api.enums.ErrorCode;
 
 public final class InvalidRequestException extends LabResultException {
     private final String field;  private final String reason;

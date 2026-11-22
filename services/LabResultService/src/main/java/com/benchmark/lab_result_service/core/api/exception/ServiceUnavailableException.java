@@ -1,4 +1,6 @@
-package com.benchmark.lab_result_service.core.api;
+package com.benchmark.lab_result_service.core.api.exception;
+
+import com.benchmark.lab_result_service.core.api.enums.ErrorCode;
 
 public final class ServiceUnavailableException extends LabResultException {
     public ServiceUnavailableException(Throwable cause) {                  // message: "Service temporarily unavailable"

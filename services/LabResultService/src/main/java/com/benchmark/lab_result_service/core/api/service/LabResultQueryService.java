@@ -1,4 +1,11 @@
-package com.benchmark.lab_result_service.core.api;
+package com.benchmark.lab_result_service.core.api.service;
+
+import com.benchmark.lab_result_service.core.api.dto.PatientLabHistoryView;
+import com.benchmark.lab_result_service.core.api.dto.PatientSummaryView;
+import com.benchmark.lab_result_service.core.api.dto.PatientView;
+import com.benchmark.lab_result_service.core.api.exception.InvalidRequestException;
+import com.benchmark.lab_result_service.core.api.exception.PatientNotFoundException;
+import com.benchmark.lab_result_service.core.api.exception.ServiceUnavailableException;
 
 /** The single business entry point. Every protocol adapter calls exactly one method, exactly once, per request. */
 public interface LabResultQueryService {
