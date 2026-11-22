@@ -1,0 +1,25 @@
+# Profile "bench-nomon" (contract §8.1, R1/F14): overlay on bench for the monitoring-off arm of the D13 overhead
+# comparison. Always activated together with bench, after it: bench,bench-nomon,seed (later profiles win).
+#   - observations off: no Observation for HTTP (http.server.requests), GraphQL (graphql.request/datafetcher) or gRPC
+#   - every meter denied: lab.service.calls, lab.errors, hikaricp.*, jvm.*, process.* become no-op meters
+#   - Prometheus export off: no PrometheusMeterRegistry, /actuator/prometheus answers 404
+#   - spring-grpc server observation off (B's adapter)
+# Not removed (QA's D13 method, contract §12 Q7): the JVM itself, the management port's Tomcat (health/info stay
+# available for readiness gating and run metadata) and external cAdvisor/Prometheus host load.
+management:
+  observations:
+    enable:
+      all: false
+  metrics:
+    enable:
+      all: false
+  prometheus:
+    metrics:
+      export:
+        enabled: false
+
+spring:
+  grpc:
+    server:
+      observation:
+        enabled: false

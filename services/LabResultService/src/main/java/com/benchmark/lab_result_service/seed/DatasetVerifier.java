@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import javax.sql.DataSource;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -44,6 +45,9 @@ public class DatasetVerifier implements ApplicationRunner {
     private final TransactionTemplate readTx;
     private final VerifyMode mode;
 
+    /** When the last verification passed (§11.2 {@code lab.dataset.verifiedAt}); {@code null} before that or when off. */
+    private volatile @Nullable Instant verifiedAt;
+
     public DatasetVerifier(DataSource dataSource, PlatformTransactionManager transactionManager,
                            DatasetProperties properties) {
         this.jdbc = new JdbcTemplate(dataSource);
@@ -56,6 +60,14 @@ public class DatasetVerifier implements ApplicationRunner {
 
     public VerifyMode mode() {
         return mode;
+    }
+
+    /**
+     * The instant the startup verification passed, for {@code /actuator/info} (§11.2). {@code null} if it is off or has
+     * not run; a failed verification fails startup, so a running application with a non-off mode always has one.
+     */
+    public @Nullable Instant verifiedAt() {
+        return verifiedAt;
     }
 
     @Override
@@ -71,6 +83,7 @@ public class DatasetVerifier implements ApplicationRunner {
             throw new IllegalStateException("Dataset verification failed (verify-mode=" + label() + "): "
                     + String.join("; ", problems == null ? List.of("no result") : problems));
         }
+        verifiedAt = Instant.now();
         log.info("dataset verified (verify-mode={}) in {} ms", label(), ms);
     }
 

@@ -11,7 +11,8 @@
 	<groupId>com.benchmark</groupId>
 	<artifactId>lab-result-service</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name/>
+	<!-- P6: build-info writes it as build.name for /actuator/info (contract §11.2); an empty <name/> omitted the key -->
+	<name>lab-result-service</name>
 	<description/>
 	<url/>
 	<licenses>
@@ -28,6 +29,9 @@
 	</scm>
 	<properties>
 		<java.version>21</java.version>
+		<!-- P6 (contract §9.2): written to META-INF/build-info.properties as build.git.sha for /actuator/info.
+		     The image build overrides it with -Dgit.sha=$GIT_SHA. -->
+		<git.sha>unknown</git.sha>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -45,6 +49,12 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc</artifactId>
+		</dependency>
+
+		<!-- P6 (contract §9.1, §11.1): /actuator/prometheus on the management port. Version from the Boot BOM. -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
 		</dependency>
 
 		<dependency>
@@ -128,6 +138,22 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+				<!-- P6 (contract §9.2): build-info for /actuator/info (build.* and build.git.sha) -->
+				<executions>
+					<execution>
+						<goals>
+							<goal>build-info</goal>
+						</goals>
+						<configuration>
+							<!-- the real build time: the inherited project.build.outputTimestamp is the fixed
+							     1980-02-01T00:00:00Z of reproducible builds, useless as run metadata -->
+							<time>${maven.build.timestamp}</time>
+							<additionalProperties>
+								<git.sha>${git.sha}</git.sha>
+							</additionalProperties>
+						</configuration>
+					</execution>
+				</executions>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
