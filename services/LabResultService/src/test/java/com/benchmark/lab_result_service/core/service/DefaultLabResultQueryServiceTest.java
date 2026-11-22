@@ -38,6 +38,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.hibernate.TransactionException;
+import org.hibernate.exception.GenericJDBCException;
 import org.hibernate.exception.JDBCConnectionException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -296,6 +297,89 @@ class DefaultLabResultQueryServiceTest {
 
         assertThatThrownBy(() -> service.getPatient(1)).isSameAs(rollbackFailure);
         assertOneCall("getPatient", "INTERNAL");
+    }
+
+    /**
+     * P4 chaos case (c), REPRODUCED in RestErrorIT: PostgreSQL ends the session (pg_terminate_backend / fast shutdown)
+     * while a statement runs. Hibernate maps FATAL 57P01 to GenericJDBCException → JpaSystemException, and the
+     * rollback on the closed connection then fails too.
+     */
+    @Test
+    void sessionEndedByTheServerMaskedByAFailedRollbackIsUnavailable() {
+        var terminated = new JpaSystemException(new GenericJDBCException("JDBC exception executing SQL",
+                new SQLException("FATAL: terminating connection due to administrator command", "57P01")));
+        var rollbackFailure = new JpaSystemException(new TransactionException("Unable to rollback against JDBC Connection"));
+        when(repository.findPatient(1)).thenThrow(terminated);
+        doThrow(rollbackFailure).when(txManager).rollback(any());
+
+        assertThatThrownBy(() -> service.getPatient(1))
+                .isInstanceOfSatisfying(ServiceUnavailableException.class, e -> assertThat(e.getCause()).isSameAs(terminated));
+        assertOneCall("getPatient", "UNAVAILABLE");
+    }
+
+    /**
+     * Dual fault (§5.5, referee finding codex #4 / claude MINOR-2): the callback throws an ordinary SQL error, then the
+     * rollback fails with a connection-loss SQLState. The connection really is gone, so the call is UNAVAILABLE, both
+     * when Spring translated the rollback failure ({@code JpaSystemException}) and when it is a
+     * {@code TransactionSystemException} carrying the callback's error as application exception.
+     */
+    @Test
+    void ordinarySqlErrorThenRollbackOnALostConnectionIsUnavailable() {
+        for (String state : List.of("08003", "08006", "57P01", "57P02", "57P03")) {
+            var grammar = new InvalidDataAccessResourceUsageException("bad SQL", new SQLException("relation missing", "42P01"));
+            var translated = new JpaSystemException(new TransactionException("Unable to rollback against JDBC Connection",
+                    new SQLException("This connection has been closed.", state)));
+            assertThat(DefaultLabResultQueryService.translate(translated, grammar)).as("JpaSystemException " + state)
+                    .isInstanceOfSatisfying(ServiceUnavailableException.class, e -> assertThat(e.getCause()).isSameAs(translated));
+
+            var tse = new TransactionSystemException("Could not roll back JPA transaction",
+                    new SQLException("This connection has been closed.", state));
+            tse.initApplicationException(grammar);
+            assertThat(DefaultLabResultQueryService.translate(tse, grammar)).as("TransactionSystemException " + state)
+                    .isInstanceOfSatisfying(ServiceUnavailableException.class, e -> assertThat(e.getCause()).isSameAs(tse));
+        }
+    }
+
+    /** The other order: connection loss in the callback, then an ordinary (non connection-loss) rollback failure. */
+    @Test
+    void connectionLossThenAnOrdinaryRollbackFailureIsUnavailable() {
+        var lost = new DataAccessResourceFailureException("I/O", new SQLException("I/O", "08006"));
+        var rollback = new JpaSystemException(new TransactionException("Unable to rollback", new SQLException("x", "XX000")));
+        assertThat(DefaultLabResultQueryService.translate(rollback, lost))
+                .isInstanceOfSatisfying(ServiceUnavailableException.class, e -> assertThat(e.getCause()).isSameAs(lost));
+    }
+
+    /** Self-falsification of the dual-fault rule: neither side signals a lost connection → INTERNAL (unchanged). */
+    @Test
+    void ordinarySqlErrorThenAnOrdinaryRollbackFailureStaysInternal() {
+        var grammar = new InvalidDataAccessResourceUsageException("bad SQL", new SQLException("relation missing", "42P01"));
+        for (SQLException rollbackCause : List.of(new SQLException("Connection is closed"), new SQLException("x", "XX000"),
+                new SQLException("x", "57014"))) {
+            var translated = new JpaSystemException(new TransactionException("Unable to rollback", rollbackCause));
+            assertThat(DefaultLabResultQueryService.translate(translated, grammar)).as(String.valueOf(rollbackCause.getSQLState()))
+                    .isSameAs(translated);
+            var tse = new TransactionSystemException("Could not roll back", rollbackCause);
+            tse.initApplicationException(grammar);
+            assertThat(DefaultLabResultQueryService.translate(tse, grammar)).as("TSE " + rollbackCause.getSQLState())
+                    .isSameAs(tse);
+        }
+    }
+
+    @Test
+    void connectionLossSqlStatesAreUnavailableOthersStayInternal() {
+        for (String state : List.of("57P01", "57P02", "57P03", "08006", "08001", "08003")) {
+            var e = new JpaSystemException(new GenericJDBCException("x", new SQLException("x", state)));
+            assertThat(DefaultLabResultQueryService.translate(e, null)).as(state).isInstanceOf(ServiceUnavailableException.class);
+        }
+        for (String state : List.of("57014", "57000", "42P01", "40001", "23505", "XX000", "22003", "55P03")) {
+            var e = new JpaSystemException(new GenericJDBCException("x", new SQLException("x", state)));
+            assertThat(DefaultLabResultQueryService.translate(e, null)).as(state).isSameAs(e);
+        }
+        var noState = new JpaSystemException(new TransactionException("x", new SQLException("Connection is closed")));
+        assertThat(DefaultLabResultQueryService.translate(noState, null)).as("no SQLState").isSameAs(noState);
+        // not a DataAccessException: never classified by SQLState
+        var raw = new IllegalStateException(new SQLException("x", "57P01"));
+        assertThat(DefaultLabResultQueryService.translate(raw, null)).isSameAs(raw);
     }
 
     @Test
