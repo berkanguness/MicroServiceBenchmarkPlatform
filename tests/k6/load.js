@@ -3,7 +3,7 @@ import exec from 'k6/execution';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { config } from './lib/config.mjs';
 import { request } from './lib/client.mjs';
-import { decode, validate, patientId, utf8Bytes } from './lib/contract.mjs';
+import { decode, validate, patientId, utf8Bytes, validateContentType } from './lib/contract.mjs';
 
 const c = config(__ENV);
 const started = new Counter('qa_started');
@@ -35,9 +35,10 @@ export default function () {
   const elapsed = Date.now() - start; // validation and parsing deliberately outside timing
   if (measured) {
     const result = decode(c.protocol, response.status, response.body, c.scenario);
-    const ok = result.ok && validate(result.value, c.scenario);
+    const contentTypeOK = validateContentType(response.headers, c.protocol);
+    const ok = result.ok && contentTypeOK && validate(result.value, c.scenario);
     operations.add(1); successes.add(ok ? 1 : 0); failures.add(!ok); latency.add(elapsed);
-    if (!ok) reasons.add(1, { reason: result.ok ? 'invalid_content' : result.reason });
+    if (!ok) reasons.add(1, { reason: !contentTypeOK ? 'incorrect_content_type' : result.ok ? 'invalid_content' : result.reason });
     if (typeof response.body === 'string') bytes.add(utf8Bytes(response.body));
   }
   if (c.pause) sleep(c.pause);

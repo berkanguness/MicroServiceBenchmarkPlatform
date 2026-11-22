@@ -10,7 +10,8 @@ export const queries = {
 export const rootField = scenario => scenario === 'S1' ? 'patientSummary' : 'patientLabHistory';
 export const patientId = scenario => scenario === 'S1' ? '3' : '1';
 export function decode(protocol, status, body, scenario) {
-  if (status !== 200) return { ok: false, reason: `http_${status}` };
+  if (status === 0) return { ok: false, reason: 'timeout_or_connection_failure' };
+  if (status !== 200) return { ok: false, reason: status >= 300 && status < 400 ? 'http_redirect_or_2xx_3xx_anomaly' : `http_${status}` };
   let parsed;
   try { parsed = JSON.parse(body); } catch (_) { return { ok: false, reason: 'invalid_json' }; }
   if (protocol === 'graphql') {
@@ -80,4 +81,12 @@ export function utf8Bytes(text) {
     bytes += code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4;
   }
   return bytes;
+}
+
+export function validateContentType(headers, protocol) {
+  if (!headers || typeof headers !== 'object') return false;
+  const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === 'content-type');
+  if (!entry) return false;
+  const value = String(entry[1]).toLowerCase();
+  return value.includes('application/json') || (protocol === 'graphql' && value.includes('application/graphql-response+json'));
 }
