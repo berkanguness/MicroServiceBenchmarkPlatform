@@ -4,6 +4,11 @@ spring:
     properties:
       hibernate:
         generate_statistics: true
+  # contract §8.1 test column: introspection on (GraphiQL stays off)
+  graphql:
+    schema:
+      introspection:
+        enabled: true
   grpc:
     server:
       port: 0
