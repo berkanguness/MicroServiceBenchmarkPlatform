@@ -1,0 +1,5 @@
+# Profile "seed" (contract §8.1): seed the synthetic dataset at startup if the database is empty.
+# Idempotent (a matching dataset_meta row skips seeding), so it is safe on every boot: SPRING_PROFILES_ACTIVE=bench,seed.
+app:
+  seed:
+    enabled: true
