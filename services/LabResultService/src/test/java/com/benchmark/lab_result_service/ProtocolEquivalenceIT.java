@@ -7,6 +7,7 @@ import com.benchmark.lab_result_service.testsupport.AbstractPostgresIT;
 import com.benchmark.lab_result_service.testsupport.CanonicalTree;
 import com.benchmark.lab_result_service.testsupport.CanonicalTree.IdEncoding;
 import com.benchmark.lab_result_service.testsupport.GraphQlDocuments;
+import com.benchmark.lab_result_service.testsupport.JdbcStatementCounter;
 import com.benchmark.lab_result_service.testsupport.SqlCapture;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -39,6 +40,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.info.BuildProperties;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
@@ -57,9 +59,13 @@ import tools.jackson.databind.node.ObjectNode;
  * other <b>and</b> to the tree built directly from the core.api record of the same service call; S2b must equal the
  * {@code testName}/{@code resultValue} projection of REST S2. Shape guards make sure the trees are not trivially
  * empty. Every request causes exactly one {@link LabResultQueryService} call (all methods counted, via the
- * {@code lab.service.calls} timer) and the R9/§5.3 statement count (Hibernate {@link Statistics}, global to the one
- * session factory, so the same scope for both protocols), and both protocols send the identical SQL text
- * ({@link SqlCapture}). The absent patient 1001 is the R9 "1 statement" case for both protocols.
+ * {@code lab.service.calls} timer) and the R9/§5.3 statement count, observed twice: at the JDBC boundary
+ * ({@link JdbcStatementCounter}: every statement created and executed on the application {@code DataSource},
+ * Hibernate or not; pool housekeeping is outside it) and inside Hibernate ({@link Statistics} prepare count, the
+ * {@link SqlCapture} SQL text). Both must equal R9, the JDBC SQL text must equal Hibernate's (no statement bypasses
+ * Hibernate), and REST must equal GraphQL in all of them. Every successful REST/GraphQL exchange must be HTTP 200
+ * {@code application/json} (§7.1, §7.2) before its body is compared. The absent patient 1001 is the R9 "1 statement"
+ * case for both protocols.
  *
  * <p>{@link #payloadSizeTable()} writes {@code target/payload-sizes.json} (§11.3, R2): the UTF-8 bytes of the HTTP
  * bodies as actually sent and received ({@code byte[]} on both sides, never {@code String.length()}). gRPC rows are
@@ -73,10 +79,15 @@ import tools.jackson.databind.node.ObjectNode;
         "app.dataset.verify-mode=cheap",
         "spring.jpa.properties.hibernate.session_factory.statement_inspector="
                 + "com.benchmark.lab_result_service.testsupport.SqlCapture"})
+@Import(JdbcStatementCounter.Config.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ProtocolEquivalenceIT extends AbstractPostgresIT {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
+    /** §7.1 REST and §7.2 GraphQL (with {@code Accept: application/json}) success media type. */
+    static final String SUCCESS_CONTENT_TYPE = "application/json";
+    /** §7.1 RFC 9457 error media type. */
+    static final String PROBLEM_CONTENT_TYPE = "application/problem+json";
     static final Path PAYLOAD_SIZES = Path.of(System.getProperty("basedir", ".")).resolve("target/payload-sizes.json");
 
     @LocalServerPort int port;
@@ -117,7 +128,7 @@ class ProtocolEquivalenceIT extends AbstractPostgresIT {
         Exchange restS1 = rest("S1", patientId);
         Exchange gqlS1 = graphQl("S1", patientId);
         Object coreS1 = CanonicalTree.of(service.getPatientSummary(patientId)); // outside every measured window
-        Object restS1Tree = CanonicalTree.fromJson(restS1.json(), IdEncoding.JSON_NUMBER);
+        Object restS1Tree = CanonicalTree.fromJson(restS1.success(), IdEncoding.JSON_NUMBER);
         Object gqlS1Tree = CanonicalTree.fromJson(gqlS1.data("patientSummary"), IdEncoding.ID_STRING);
         assertThat(gqlS1Tree).as("S1 GraphQL == REST, patient %d", patientId).isEqualTo(restS1Tree);
         assertThat(restS1Tree).as("S1 REST == core record, patient %d", patientId).isEqualTo(coreS1);
@@ -127,7 +138,7 @@ class ProtocolEquivalenceIT extends AbstractPostgresIT {
         Exchange restS2 = rest("S2", patientId);
         Exchange gqlS2 = graphQl("S2", patientId);
         Object coreS2 = CanonicalTree.of(service.getPatientLabHistory(patientId));
-        Object restS2Tree = CanonicalTree.fromJson(restS2.json(), IdEncoding.JSON_NUMBER);
+        Object restS2Tree = CanonicalTree.fromJson(restS2.success(), IdEncoding.JSON_NUMBER);
         Object gqlS2Tree = CanonicalTree.fromJson(gqlS2.data("patientLabHistory"), IdEncoding.ID_STRING);
         assertThat(gqlS2Tree).as("S2 GraphQL == REST, patient %d", patientId).isEqualTo(restS2Tree);
         assertThat(restS2Tree).as("S2 REST == core record, patient %d", patientId).isEqualTo(coreS2);
@@ -140,7 +151,7 @@ class ProtocolEquivalenceIT extends AbstractPostgresIT {
                 .isEqualTo(CanonicalTree.s2bProjection(restS2Tree));
         assertCost(restS2, gqlS2b, "getPatientLabHistory", statements);
 
-        assertShape(patientId, restS1.json(), restS2.json());
+        assertShape(patientId, restS1.success(), restS2.success());
     }
 
     /** Self-falsification: the equal trees above are the dataset of §6.1/§6.2, not two empty or truncated bodies. */
@@ -184,19 +195,37 @@ class ProtocolEquivalenceIT extends AbstractPostgresIT {
             Exchange rest = scenario.equals("S2b") ? rest("S2", 1001) : rest(scenario, 1001);
             Exchange gql = graphQl(scenario, 1001);
 
-            assertThat(rest.status()).isEqualTo(404);
+            assertThat(rest.status()).as("REST %s status", rest.label()).isEqualTo(404);
+            assertThat(rest.contentType()).as("REST %s Content-Type (§7.1)", rest.label())
+                    .isEqualTo(PROBLEM_CONTENT_TYPE);
             assertThat(rest.json().path("code").asString()).isEqualTo("PATIENT_NOT_FOUND");
             JsonNode body = gql.json();
-            assertThat(gql.status()).isEqualTo(200);
-            assertThat(body.path("data").get(root).isNull()).as("%s data.%s null", scenario, root).isTrue();
+            assertThat(gql.status()).as("GraphQL %s status", gql.label()).isEqualTo(200);
+            assertThat(gql.contentType()).as("GraphQL %s Content-Type (§7.2)", gql.label())
+                    .isEqualTo(SUCCESS_CONTENT_TYPE);
+            JsonNode data = body.path("data");
+            assertThat(data.has(root)).as("%s data has %s: %s", scenario, root, body).isTrue();
+            assertThat(data.get(root).isNull()).as("%s data.%s null", scenario, root).isTrue();
             assertThat(body.path("errors")).hasSize(1);
-            assertThat(body.path("errors").get(0).path("extensions").path("code").asString())
-                    .isEqualTo("PATIENT_NOT_FOUND");
+            JsonNode extensions = body.path("errors").get(0).path("extensions");
+            assertThat(extensions.path("code").asString()).isEqualTo("PATIENT_NOT_FOUND");
+            assertThat(extensions.path("classification").asString()).as("§7.2 classification").isEqualTo("NOT_FOUND");
             assertCost(rest, gql, method, 1);
         }
     }
 
     private static void assertCost(Exchange rest, Exchange graphQl, String method, int statements) {
+        // JDBC boundary: every statement on the application DataSource, Hibernate or not (R9)
+        for (Exchange e : List.of(rest, graphQl)) {
+            assertThat(e.jdbc().statements()).as("%s %s JDBC statements (R9)", e.protocol(), e.label())
+                    .isEqualTo(statements);
+            assertThat(e.jdbc().executions()).as("%s %s JDBC executions (R9)", e.protocol(), e.label())
+                    .isEqualTo(statements);
+            assertThat(e.jdbc().sql()).as("%s %s JDBC SQL == Hibernate SQL (nothing bypasses Hibernate)",
+                    e.protocol(), e.label()).isEqualTo(e.sql());
+        }
+        assertThat(graphQl.jdbc()).as("GraphQL %s JDBC == REST", graphQl.label()).isEqualTo(rest.jdbc());
+        // Hibernate: prepare count and SQL text
         assertThat(rest.statements()).as("REST %s statements (R9)", rest.label()).isEqualTo(statements);
         assertThat(graphQl.statements()).as("GraphQL %s statements == REST", graphQl.label())
                 .isEqualTo(rest.statements());
@@ -235,11 +264,13 @@ class ProtocolEquivalenceIT extends AbstractPostgresIT {
         ArrayNode entries = table.putArray("entries");
 
         for (Row row : ROWS) {
-            Exchange e = row.protocol().equals("REST") ? rest(row.scenario(), row.patientId())
-                    : graphQl(row.scenario(), row.patientId());
-            assertThat(e.status()).isEqualTo(200);
+            Exchange e = switch (row.protocol()) {
+                case "REST" -> rest(row.scenario(), row.patientId());
+                case "GRAPHQL" -> graphQl(row.scenario(), row.patientId());
+                default -> throw new IllegalStateException("no transport for protocol " + row.protocol());
+            };
+            e.assertSuccess();
             assertThat(e.contentEncoding()).as("no compression (§7.1)").isEmpty();
-            assertThat(e.contentType()).startsWith("application/json");
             assertBodyBytesAreUtf8Bytes(e);
 
             ObjectNode entry = entries.addObject();
@@ -295,16 +326,28 @@ class ProtocolEquivalenceIT extends AbstractPostgresIT {
 
     private record Exchange(String protocol, String label, String operation, int status, byte[] requestBody,
             byte[] responseBody, String contentType, Optional<String> contentEncoding,
-            OptionalLong contentLength, long statements, List<String> sql, Map<String, Long> serviceCalls) {
+            OptionalLong contentLength, long statements, List<String> sql, JdbcStatementCounter.Snapshot jdbc,
+            Map<String, Long> serviceCalls) {
 
         JsonNode json() {
             return JSON.readTree(new String(responseBody, StandardCharsets.UTF_8));
         }
 
+        /** §7.1/§7.2: a successful exchange is HTTP 200 with {@code Content-Type: application/json}. */
+        void assertSuccess() {
+            assertThat(status).as("%s %s HTTP status", protocol, label).isEqualTo(200);
+            assertThat(contentType).as("%s %s Content-Type", protocol, label).isEqualTo(SUCCESS_CONTENT_TYPE);
+        }
+
+        /** The body of a successful exchange, checked by {@link #assertSuccess()} before it is read. */
+        JsonNode success() {
+            assertSuccess();
+            return json();
+        }
+
         JsonNode data(String rootField) {
-            JsonNode body = json();
+            JsonNode body = success();
             assertThat(body.has("errors")).as("%s %s errors: %s", protocol, label, body.path("errors")).isFalse();
-            assertThat(status).isEqualTo(200);
             return body.path("data").path(rootField);
         }
     }
@@ -328,10 +371,12 @@ class ProtocolEquivalenceIT extends AbstractPostgresIT {
             throws IOException, InterruptedException {
         Map<String, Long> callsBefore = serviceCalls();
         SqlCapture.clear();
+        JdbcStatementCounter.clear();
         long before = stats.getPrepareStatementCount();
         HttpResponse<byte[]> response = http.send(request, HttpResponse.BodyHandlers.ofByteArray());
         long statements = stats.getPrepareStatementCount() - before;
         List<String> sql = SqlCapture.statements();
+        JdbcStatementCounter.Snapshot jdbc = JdbcStatementCounter.snapshot();
         Map<String, Long> callsAfter = serviceCalls();
         Map<String, Long> delta = new TreeMap<>();
         callsAfter.forEach((method, count) -> {
@@ -343,7 +388,7 @@ class ProtocolEquivalenceIT extends AbstractPostgresIT {
         return new Exchange(protocol, label, operation, response.statusCode(), requestBody, response.body(),
                 response.headers().firstValue("Content-Type").orElse(""),
                 response.headers().firstValue("Content-Encoding"),
-                response.headers().firstValueAsLong("Content-Length"), statements, sql, delta);
+                response.headers().firstValueAsLong("Content-Length"), statements, sql, jdbc, delta);
     }
 
     /** {@code lab.service.calls} count per {@code method} tag, over every outcome. */
