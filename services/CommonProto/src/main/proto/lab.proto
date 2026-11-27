@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package hospital;
 
+import "google/protobuf/timestamp.proto";
+
 option java_package = "com.benchmark.proto";
 option java_multiple_files = true;
 
@@ -9,20 +11,45 @@ message PatientRequest {
   int64 patient_id = 1;
 }
 
+message Patient {
+  int64  id         = 1;
+  string tc_no      = 2;
+  string full_name  = 3;
+  string birth_date = 4;
+  string blood_type = 5;
+}
+
 message LabItemResponse {
-  int64 id = 1;
-  string test_code = 2;
-  string test_name = 3;
+  int64  id           = 1;
+  string test_code    = 2;
+  string test_name    = 3;
   double result_value = 4;
-  string unit = 5;
-  bool is_critical = 6;
+  string unit         = 5;
+  bool   is_critical  = 6;
+}
+
+message LabReport {
+  int64  id          = 1;
+  string doctor_name = 2;
+  string sample_type = 3;
+  google.protobuf.Timestamp created_at = 4;
+  repeated LabItemResponse items = 5;
+}
+
+message PatientSummaryResponse {
+  Patient   patient       = 1;
+  LabReport latest_report = 2;
 }
 
 message PatientLabHistoryResponse {
-  int64 patient_id = 1;
-  repeated LabItemResponse items = 2;
+  reserved 1, 2;
+  reserved "patient_id", "items";
+  Patient patient = 3;
+  repeated LabReport reports = 4;
 }
 
 service LabService {
+  rpc GetPatient           (PatientRequest) returns (Patient);
+  rpc GetPatientSummary    (PatientRequest) returns (PatientSummaryResponse);
   rpc GetPatientLabHistory (PatientRequest) returns (PatientLabHistoryResponse);
 }
